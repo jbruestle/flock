@@ -18,8 +18,10 @@ from async import AsyncMgr
 
 logger = logging.getLogger('sync')
 
-GOAL_PEERS = 5
-MAX_PEER = 10
+GOAL_PEERS = 8
+MAX_PEERS = 20
+CONNECT_TIMEOUT = 5
+NEGOTIATE_TIMEOUT = 2 
 
 class Connection(asynchat.async_chat):
     def __init__(self, sock, map=None):
@@ -86,6 +88,12 @@ class SyncConnection(Connection):
         self.recv_struct(HELLO_FMT, self.on_hello)
 
     def handle_error(self):
+        logger.debug("Got an error")
+        Connection.handle_error(self)
+        self.store.on_disconnect(self.addr, self.remote)
+
+    def handle_close(self):
+        logger.debug("Got a close")
         Connection.handle_error(self)
         self.store.on_disconnect(self.addr, self.remote)
 
@@ -189,28 +197,47 @@ class SyncConnection(Connection):
             self.send_buffer("S")
             self.send_struct(SUMMARY_FMT, seq, wtok.hid, wtok.time, wtok.nonce)
 
-class SyncServerConn(SyncConnection):
+class SyncPeerConn(SyncConnection):
+    def __init__(self, peer, sock, timeout):
+        self.peer = peer
+        SyncConnection.__init__(self, peer.nid, peer.store, sock, map=peer.asm.async_map)
+        self.timer = peer.asm.add_timer(time.time() + timeout, self.timeout)
+
+    def on_done(self):
+        self.peer.on_disconnect()
+        if self.timer is not None:
+            self.peer.asm.cancel(self.timer)
+
+    def handle_error(self):
+        logger.info("Got an error, remote = %s", self.addr)
+        SyncConnection.handle_error(self)
+        self.on_done()
+
+    def handle_close(self):
+        logger.info("Got a close, remote = %s", self.addr)
+        SyncConnection.handle_close(self)
+        self.on_done()
+
+    def timeout(self):
+        self.timer = None
+        if self.remote is None:
+            logger.info("Negotiation not complete, remote = %s", self.addr)
+            self.close()
+            self.handle_close()
+
+class SyncServerConn(SyncPeerConn):
     def __init__(self, peer, sock):
         self.peer = peer
-        SyncConnection.__init__(self, peer.nid, peer.store, sock, map=peer.asm.async_map)
+        SyncPeerConn.__init__(self, peer, sock, NEGOTIATE_TIMEOUT)
         self.start()
 
-    def handle_error(self):
-        SyncConnection.handle_error(self)
-        self.peer.on_disconnect()
-
-class SyncClientConn(SyncConnection):
+class SyncClientConn(SyncPeerConn):
     def __init__(self, peer, addr):
         self.peer = peer
-        self.pending = True
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        SyncConnection.__init__(self, peer.nid, peer.store, sock, map=peer.asm.async_map)
+        SyncPeerConn.__init__(self, peer, sock, CONNECT_TIMEOUT + NEGOTIATE_TIMEOUT)
         self.addr = addr
         self.connect(addr)
-
-    def handle_error(self):
-        SyncConnection.handle_error(self)
-        self.peer.on_disconnect()
 
     def handle_connect(self):
         self.start()
@@ -224,6 +251,7 @@ class SyncPeer(asyncore.dispatcher):
         self.connections = 0
         asyncore.dispatcher.__init__(self, sock=sock, map=self.asm.async_map)
         self.listen(5)
+
         self.asm.add_timer(time.time() + 1, self.on_timer)
 
     def add_peer(self, addr):
@@ -238,16 +266,19 @@ class SyncPeer(asyncore.dispatcher):
             return
         self.connections += 1
         logger.info("Making connection to %s", peer)
-        sc = SyncClientConn(self, peer)
+        _ = SyncClientConn(self, peer)
 
     def handle_accept(self):
         pair = self.accept()
         if pair is None:
             return
         (sock, addr) = pair
+        if self.connections >= MAX_PEERS:
+            sock.close()
+            return
         self.connections += 1
         logger.info("Incoming connection from %s", addr)
-        sc = SyncServerConn(self, sock)
+        _ = SyncServerConn(self, sock)
 
     def on_disconnect(self):
         self.connections -= 1
@@ -306,9 +337,16 @@ class TestSync(unittest.TestCase):
             TestSync.add_data(all_data, ss1, i)
         for i in range(20, 40):
             TestSync.add_data(all_data, ss2, i)
+        # Checks the no-connect timeout works
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        local = ('', 7001)
+        sock.bind(local)
+        sock.listen(5)
+        node1.add_peer(('127.0.0.1', 8001))
         node1.add_peer(('127.0.0.1', 7001))
         node1.add_peer(('127.0.0.1', 6001))
-        asm.run(5.0)
+        asm.run(20.0)
         for i in range(40):
             self.assertTrue(ss1.get_data(all_data[i][0].hid) is not None)
             self.assertTrue(ss2.get_data(all_data[i][0].hid) is not None)
