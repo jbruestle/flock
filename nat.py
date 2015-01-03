@@ -8,6 +8,7 @@ import miniupnpc
 import socket
 import threading
 import logging
+import select
 
 logger = logging.getLogger('nat')
 
@@ -74,9 +75,10 @@ def setup_upnp(local):
     return (upnp, try_port)
 
 class BaseConfig(object):
-    def __init__(self, sock, ext_port):
+    def __init__(self, sock, ext_ip, ext_port):
         # Set external variables
         self.sock = sock
+        self.ext_ip = ext_ip
         self.ext_port = ext_port
         (self.is_done, self.__make_done) = socket.socketpair()
 
@@ -106,7 +108,7 @@ class BaseConfig(object):
 
 class ExtV4Config(BaseConfig):
     def __init__(self, sock, addr, port):
-        BaseConfig.__init__(self, sock, port)
+        BaseConfig.__init__(self, sock, str(addr), port)
         self.addr = addr
 
     def _check(self):
@@ -116,13 +118,13 @@ class ExtV4Config(BaseConfig):
 class UPNPConfig(BaseConfig):
     def __init__(self, sock, local, upnp_res):
         (upnp, port) = upnp_res
-        BaseConfig.__init__(self, sock, port)
+        BaseConfig.__init__(self, sock, upnp.externalipaddress(), port)
         self.local_addr = local[0]
         self.local_port = local[1]
         self.upnp = upnp
 
     def _check(self):
-        logger.info("Checking UPNP mapping")
+        logger.debug("Checking UPNP mapping")
         ipv4 = get_ipv4_default_addr()
         if str(ipv4) != self.local_addr:
             return False
@@ -151,7 +153,6 @@ def autodetect_config():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     local = (str(ipv4), LOCAL_PORT)
     sock.bind(local)
-    sock.listen(5)
 
     # Check if it's private
     if ipv4.is_private:
@@ -170,8 +171,14 @@ def autodetect_config():
         logger.info("Looks like an external IP")
         return ExtV4Config(sock, ipv4, LOCAL_PORT)
 
-#logging.basicConfig(level=logging.DEBUG)
-#config = autodetect_config()
-#sout = select.select([config.is_done], [], [], 30)
-#config.stop()
+def main():
+    logging.basicConfig(level=logging.DEBUG)
+    config = autodetect_config()
+    sout = select.select([config.is_done], [], [], 30)
+    config.stop()
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    main()
+
 

@@ -25,12 +25,12 @@ GOOD_RETRY_SLOP = 5*60
 SEND_RATE = .05
 
 class DhtRpc(asyncore.dispatcher):
-    def __init__(self, dht, asm):
+    def __init__(self, dht, asm, port=6881):
         asyncore.dispatcher.__init__(self, map=asm.async_map)
         self.dht = dht
         self.asm = asm
         self.create_socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.bind(('', 6881))
+        self.bind(('', port))
         self.tid = 0
         self.pending = {}
         self.handlers = {}
@@ -260,6 +260,7 @@ class DhtLocation(object):
         self.buckets = [DhtBucket(dht, self) for _ in range(160)]
         self.timer = None
         self.peers = collections.OrderedDict()
+        self.on_found_peer = None
 
     def __shared_bits(self, nid1, nid2):
         _ = self
@@ -299,14 +300,12 @@ class DhtLocation(object):
 
     def try_send(self):
         self.timer = None
-        level = 0
-        for bucket in self.buckets:
-            sent = bucket.try_send()
+        for level in range(159, -1, -1):
+            sent = self.buckets[level].try_send()
             if sent:
-                logger.info("For %s, send on level %d", self.tid.encode('hex'), level)
+                logger.debug("For %s, send on level %d", self.tid.encode('hex'), level)
                 self.start_timer()
                 return
-            level += 1
 
     def add_node(self, addr, nid):
         shared = self.__shared_bits(self.tid, nid)
@@ -319,15 +318,17 @@ class DhtLocation(object):
     def found_peer(self, addr):
         if addr in self.peers:
             return
-        logger.debug("Found new peer: %s", addr)
+        if self.on_found_peer is not None:
+            self.on_found_peer(addr)
+        logger.info("Found new peer: %s", addr)
         self.peers[addr] = 1
         while len(self.peers) > LOC_PEERS:
             self.peers.popitem(False)
 
 class Dht(object):
-    def __init__(self, asm, mid):
+    def __init__(self, asm, mid, port=6881):
         self.asm = asm
-        self.rpc = DhtRpc(self, self.asm)
+        self.rpc = DhtRpc(self, self.asm, port)
         self.mid = mid
         self.locations = {}
         self.add_location(mid, None)
@@ -337,7 +338,9 @@ class Dht(object):
         self.rpc.add_handler('announce', self.__announce_request)
 
     def add_location(self, tid, port):
-        self.locations[tid] = DhtLocation(self, tid, port)
+        loc = DhtLocation(self, tid, port)
+        self.locations[tid] = loc
+        return loc
 
     def bootstrap_node(self, addr):
         addr = (socket.gethostbyname(addr[0]), addr[1])

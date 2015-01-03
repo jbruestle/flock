@@ -3,8 +3,12 @@
 
 import sqlite3
 import hashlib
+import time
 import unittest
+import logging
 from worktoken import WorkToken
+
+logger = logging.getLogger('store')
 
 class SyncStore(object):
     internal_sql = '''
@@ -19,13 +23,15 @@ class SyncStore(object):
     CREATE TABLE ips (
         ip     TEXT,
         port   INTEGER,
+        atime  INTEGER,
+        ctime  INTEGER,
         errors INTEGER,
-        nid    TEXT,
+        busy   INTEGER,
         PRIMARY KEY (ip, port)
     );
     CREATE TABLE peers (
         nid    TEXT PRIMARY KEY,
-        state  INTEGER,
+        busy   INTEGER,
         seq    INTEGER
     );
     CREATE UNIQUE INDEX records_hid ON records (hid);
@@ -50,23 +56,62 @@ class SyncStore(object):
             self.cur_size -= size
             self.cur.execute("DELETE FROM records WHERE seq = ?", (seq,))
 
-    def on_connect(self, nid):
-        self.cur.execute("SELECT state, seq from peers WHERE nid = ?", (nid,))
+    def clear_conn_state(self):
+        self.cur.execute("UPDATE ips SET busy = 0")
+        self.cur.execute("UPDATE peers SET busy = 0")
+
+    def on_add_peer(self, addr):
+        self.cur.execute(
+            "INSERT OR IGNORE INTO ips "
+            "(ip, port, atime, ctime, errors, busy) "
+            "VALUES (?, ?, ?, NULL, 0, 0)",
+            (addr[0], addr[1], int(time.time())))
+
+    def find_peer(self):
+        self.cur.execute(
+            "SELECT ip, port FROM ips " + 
+            "WHERE busy = 0 ORDER BY " + 
+            "errors ASC, IFNULL(ctime, 0) DESC, atime DESC LIMIT 1")
         row = self.cur.fetchone()
         if row == None:
-            self.cur.execute("INSERT INTO peers (nid, state, seq) VALUES (?, ?, ?)",
-                (nid, 1, 0)) 
-            return 0
-        (state, seq) = row
-        if state == 1:
+            logger.debug("Finding peers, no result")
             return None
+        (ip, port) = row
+        logger.debug("Finding peers: r = %s", (ip, port))
+        self.cur.execute("UPDATE ips SET busy = 1, errors = errors + 1 WHERE ip = ? AND port = ?",
+            (ip, port))
+        return (ip, port)
+
+    def on_connect(self, addr, nid):
+        logger.info("on_connect, addr = %s, nid = %s", addr, nid)
+        self.cur.execute("SELECT busy, seq from peers WHERE nid = ?", (buffer(nid),))
+        row = self.cur.fetchone()
+        if row is not None and row[0] == 1:
+            # Busy case, simply return failue
+            return None
+        seq = 0
+        if row is None:
+            self.cur.execute("INSERT INTO peers (nid, busy, seq) VALUES (?, ?, ?)",
+                (buffer(nid), 1, seq)) 
+        else:
+            self.cur.execute("UPDATE peers SET busy = 1 WHERE nid = ?", (buffer(nid),))
+            seq = row[0]
+        
+        if addr is not None:
+            self.cur.execute("UPDATE ips SET ctime = ?, errors = 0 WHERE ip = ? AND port = ?",
+                (int(time.time()), addr[0], addr[1]))
+
         return seq
 
-    def on_disconnect(self, nid):
-        self.cur.execute("UPDATE peers SET state = 1 WHERE nid = ?", (nid,))
+    def on_disconnect(self, addr, nid):
+        logger.info("on_disconnect, addr = %s, nid = %s", addr, nid)
+        if nid is not None:
+            self.cur.execute("UPDATE peers SET state = 0 WHERE nid = ?", (buffer(nid),))
+        if addr is not None:
+            self.cur.execute("UPDATE ips SET busy = 0 WHERE ip = ? AND port = ?", addr) 
 
     def on_seq_update(self, nid, seq):
-        self.cur.execute("UPDATE peers SET seq = ? WHERE nid = ?", (nid, seq))
+        self.cur.execute("UPDATE peers SET seq = ? WHERE nid = ?", (buffer(nid), seq))
 
     def on_worktoken(self, wtok):
         self.cur.execute(

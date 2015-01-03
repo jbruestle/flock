@@ -2,6 +2,7 @@
 #pylint: disable=missing-docstring
 
 from collections import deque
+import time
 import asyncore
 import asynchat
 import struct
@@ -10,11 +11,16 @@ import traceback
 import socket
 import unittest
 import logging
+import random
 
 from worktoken import WorkToken
 from store import SyncStore
+from async import AsyncMgr
 
 logger = logging.getLogger('sync')
+
+GOAL_PEERS = 5
+MAX_PEER = 10
 
 class Connection(asynchat.async_chat):
     def __init__(self, sock, map=None):
@@ -24,7 +30,7 @@ class Connection(asynchat.async_chat):
         self.__fmt = None
 
     def handle_error(self):
-        logger.warning("got error: %s", traceback.format_exc())
+        #logger.warning("got error: %s", traceback.format_exc())
         self.close()
 
     def collect_incoming_data(self, data):
@@ -68,29 +74,31 @@ class SyncConnection(Connection):
         Connection.__init__(self, sock, map=map)
         self.nid = nid
         self.remote = None
+        self.addr = None
         self.store = sstore
-        self.send_struct(HELLO_FMT, '0net', self.nid)
-        self.recv_struct(HELLO_FMT, self.on_hello)
         self.await_advance = deque()
         self.await_data = deque()
         self.max_outstanding = 0
         self.send_seq = 0
-        self.recv_seq = 0
+        self.recv_seq = None 
+
+    def start(self):
+        self.send_struct(HELLO_FMT, '0net', self.nid)
+        self.recv_struct(HELLO_FMT, self.on_hello)
 
     def handle_error(self):
         Connection.handle_error(self)
-        if self.recv_seq != None:
-            self.store.on_disconnect(self.remote)
+        self.store.on_disconnect(self.addr, self.remote)
 
     def on_hello(self, magic, remote):
         logger.debug("Got hello")
         if magic != '0net':
             logger.debug("Invalid magic")
             raise ValueError('Invalid magic')
-        self.remote = remote
-        self.recv_seq = self.store.on_connect(remote)
+        self.recv_seq = self.store.on_connect(self.addr, remote)
         if self.recv_seq == None:
             raise ValueError('Already connected to remote')
+        self.remote = remote
         self.send_struct(HELLO_ACK_FMT, self.recv_seq, 50)
         self.recv_struct(HELLO_ACK_FMT, self.on_hello_ack)
         
@@ -182,58 +190,131 @@ class SyncConnection(Connection):
             self.send_buffer("S")
             self.send_struct(SUMMARY_FMT, seq, wtok.hid, wtok.time, wtok.nonce)
 
+class SyncServerConn(SyncConnection):
+    def __init__(self, peer, sock):
+        self.peer = peer
+        SyncConnection.__init__(self, peer.nid, peer.store, sock, map=peer.asm.async_map)
+        self.start()
+
+    def handle_error(self):
+        SyncConnection.handle_error(self)
+        self.peer.on_disconnect()
+
+class SyncClientConn(SyncConnection):
+    def __init__(self, peer, addr):
+        self.peer = peer
+        self.pending = True
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        SyncConnection.__init__(self, peer.nid, peer.store, sock, map=peer.asm.async_map)
+        self.addr = addr
+        self.connect(addr)
+    
+    def handle_error(self):
+        SyncConnection.handle_error(self)
+        self.peer.on_disconnect()
+
+    def handle_connect(self):
+        self.start()
+
 class SyncPeer(asyncore.dispatcher):
-    def __init__(self, nid, store, sock):
-        self.async_map = {}
+    def __init__(self, asm, nid, store, sock):
+        self.asm = asm
         self.store = store
         self.nid = nid
-        asyncore.dispatcher.__init__(self, sock=sock, map=self.async_map)
+        self.store.clear_conn_state()
+        self.connections = 0
+        asyncore.dispatcher.__init__(self, sock=sock, map=self.asm.async_map)
+        self.listen(5)
+        self.asm.add_timer(time.time() + 1, self.on_timer)
 
-    def on_peer_discover(self, addr, port):
-        pass
+    def add_peer(self, addr):
+        self.store.on_add_peer(addr)
+
+    def on_timer(self):
+        self.asm.add_timer(time.time() + 1, self.on_timer)
+        if self.connections >= GOAL_PEERS:
+            return
+        peer = self.store.find_peer()
+        if peer == None:
+            return
+        self.connections += 1
+        logger.info("Making connection to %s", peer)
+        sc = SyncClientConn(self, peer)
 
     def handle_accept(self):
         pair = self.accept()
         if pair is None:
             return
         (sock, addr) = pair
+        self.connections += 1
         logger.info("Incoming connection from %s", addr)
-        SyncConnection(self.nid, self.store, sock, map=self.async_map)
+        sc = SyncServerConn(self, sock)
+
+    def on_disconnect(self):
+        self.connections -= 1
 
 class TestSync(unittest.TestCase):
-    #pylint: disable=too-few-public-methods
+    @staticmethod
+    def add_data(all_data, store, num):
+        data = str(num)
+        hid = hashlib.sha256(data).digest()
+        wtok = WorkToken(hid)
+        all_data.append((wtok, data))
+        store.on_record(wtok, data)
+        
     def test_simple(self):
+        return
         # Make room for 40 cakes
         ss1 = SyncStore(":memory:", WorkToken.overhead * 41)
         # Insert some records
         all_data = []
         for i in range(20):
-            data = str(i)
-            hid = hashlib.sha256(data).digest()
-            wtok = WorkToken(hid)
-            all_data.append((wtok, data))
-            ss1.on_record(wtok, data)
+            TestSync.add_data(all_data, ss1, i)
         # Make something to sync it to
         ss2 = SyncStore(":memory:", WorkToken.overhead * 41)
         # Make some fake socket action
         for i in range(20, 40):
-            data = str(i)
-            hid = hashlib.sha256(data).digest()
-            wtok = WorkToken(hid)
-            all_data.append((wtok, data))
-            ss2.on_record(wtok, data)
-        (sock1, sock2) = socket.socketpair()
+            TestSync.add_data(all_data, ss2, i)
         # Make the connections
         n1 = SyncConnection('a' * 32, ss1, sock1)
         n2 = SyncConnection('b' * 32, ss2, sock2)
+        n1.start()
+        n2.start()
         # Kick off some async action
         asyncore.loop(timeout=1, count=5)
         # Check the client has records
-        for i in range(20):
+        for i in range(40):
             self.assertTrue(ss1.get_data(all_data[i][0].hid) is not None)
             self.assertTrue(ss2.get_data(all_data[i][0].hid) is not None)
         _ = n1
         _ = n2
+
+    @staticmethod
+    def make_node(asm, store, port):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        local = ('', port)
+        sock.bind(local)
+        nid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
+        return SyncPeer(asm, nid, store, sock)
+
+    def test_node(self):
+        asm = AsyncMgr()
+        ss1 = SyncStore(":memory:", WorkToken.overhead * 41)
+        ss2 = SyncStore(":memory:", WorkToken.overhead * 41)
+        node1 = TestSync.make_node(asm, ss1, 6000)
+        node2 = TestSync.make_node(asm, ss2, 6001)
+        all_data = []
+        for i in range(20):
+            TestSync.add_data(all_data, ss1, i)
+        for i in range(20, 40):
+            TestSync.add_data(all_data, ss2, i)
+        node1.add_peer(('127.0.0.1', 7001))
+        node1.add_peer(('127.0.0.1', 6001))
+        asm.run()
+        for i in range(40):
+            self.assertTrue(ss1.get_data(all_data[i][0].hid) is not None)
+            self.assertTrue(ss2.get_data(all_data[i][0].hid) is not None)
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
