@@ -22,9 +22,9 @@ def safe_found_peer(speer, self_addr, peer_addr):
 
 def main():
     #parser = argparse.ArgumentParser()
-    #parser.add_argument("-c", "--config", default="flock.json", help="Name of config file") 
+    #parser.add_argument("-c", "--config", default="flock.json", help="Name of config file")
     #args = parser.parse_args()
-    
+
     #config = ConfigParser.RawConfigParser()
     #config.read(args.config)
     logging.basicConfig(level=logging.INFO)

@@ -7,7 +7,6 @@ import asyncore
 import asynchat
 import struct
 import hashlib
-import traceback
 import socket
 import unittest
 import logging
@@ -63,7 +62,7 @@ class Connection(asynchat.async_chat):
         self.__term_callback = callback
         self.set_terminator(struct.calcsize(fmt))
 
-HELLO_FMT = '!4s32s'  # Magic #, ID 
+HELLO_FMT = '!4s32s'  # Magic #, ID
 HELLO_ACK_FMT = '!QL'  # Seq No, Buffer size
 SUMMARY_FMT = '!Q32sQQ' # Seq No, Hash, Timestamp, Nonce
 DATA_HDR_FMT = '!H' # Data size
@@ -80,7 +79,7 @@ class SyncConnection(Connection):
         self.await_data = deque()
         self.max_outstanding = 0
         self.send_seq = 0
-        self.recv_seq = None 
+        self.recv_seq = None
 
     def start(self):
         self.send_struct(HELLO_FMT, '0net', self.nid)
@@ -101,7 +100,7 @@ class SyncConnection(Connection):
         self.remote = remote
         self.send_struct(HELLO_ACK_FMT, self.recv_seq, 50)
         self.recv_struct(HELLO_ACK_FMT, self.on_hello_ack)
-        
+
     def on_hello_ack(self, seq, max_outstanding):
         logger.debug("Got hello ack")
         if max_outstanding > 100:
@@ -208,7 +207,7 @@ class SyncClientConn(SyncConnection):
         SyncConnection.__init__(self, peer.nid, peer.store, sock, map=peer.asm.async_map)
         self.addr = addr
         self.connect(addr)
-    
+
     def handle_error(self):
         SyncConnection.handle_error(self)
         self.peer.on_disconnect()
@@ -261,9 +260,8 @@ class TestSync(unittest.TestCase):
         wtok = WorkToken(hid)
         all_data.append((wtok, data))
         store.on_record(wtok, data)
-        
+
     def test_simple(self):
-        return
         # Make room for 40 cakes
         ss1 = SyncStore(":memory:", WorkToken.overhead * 41)
         # Insert some records
@@ -276,6 +274,7 @@ class TestSync(unittest.TestCase):
         for i in range(20, 40):
             TestSync.add_data(all_data, ss2, i)
         # Make the connections
+        (sock1, sock2) = socket.socketpair()
         n1 = SyncConnection('a' * 32, ss1, sock1)
         n2 = SyncConnection('b' * 32, ss2, sock2)
         n1.start()
@@ -286,8 +285,6 @@ class TestSync(unittest.TestCase):
         for i in range(40):
             self.assertTrue(ss1.get_data(all_data[i][0].hid) is not None)
             self.assertTrue(ss2.get_data(all_data[i][0].hid) is not None)
-        _ = n1
-        _ = n2
 
     @staticmethod
     def make_node(asm, store, port):
@@ -311,7 +308,7 @@ class TestSync(unittest.TestCase):
             TestSync.add_data(all_data, ss2, i)
         node1.add_peer(('127.0.0.1', 7001))
         node1.add_peer(('127.0.0.1', 6001))
-        asm.run()
+        asm.run(5.0)
         for i in range(40):
             self.assertTrue(ss1.get_data(all_data[i][0].hid) is not None)
             self.assertTrue(ss2.get_data(all_data[i][0].hid) is not None)

@@ -174,7 +174,7 @@ def autodetect_config():
 def main():
     logging.basicConfig(level=logging.DEBUG)
     config = autodetect_config()
-    sout = select.select([config.is_done], [], [], 30)
+    _ = select.select([config.is_done], [], [], 30)
     config.stop()
 
 if __name__ == '__main__':

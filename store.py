@@ -1,5 +1,6 @@
 #!/usr/bin/python
 #pylint: disable=missing-docstring
+#pylint: disable=bad-continuation
 
 import sqlite3
 import hashlib
@@ -69,18 +70,18 @@ class SyncStore(object):
 
     def find_peer(self):
         self.cur.execute(
-            "SELECT ip, port FROM ips " + 
-            "WHERE busy = 0 ORDER BY " + 
+            "SELECT ip, port FROM ips " +
+            "WHERE busy = 0 ORDER BY " +
             "errors ASC, IFNULL(ctime, 0) DESC, atime DESC LIMIT 1")
         row = self.cur.fetchone()
         if row == None:
             logger.debug("Finding peers, no result")
             return None
-        (ip, port) = row
-        logger.debug("Finding peers: r = %s", (ip, port))
+        (ipaddr, port) = row
+        logger.debug("Finding peers: r = %s", (ipaddr, port))
         self.cur.execute("UPDATE ips SET busy = 1, errors = errors + 1 WHERE ip = ? AND port = ?",
-            (ip, port))
-        return (ip, port)
+            (ipaddr, port))
+        return (ipaddr, port)
 
     def on_connect(self, addr, nid):
         logger.info("on_connect, addr = %s, nid = %s", addr, nid)
@@ -92,11 +93,11 @@ class SyncStore(object):
         seq = 0
         if row is None:
             self.cur.execute("INSERT INTO peers (nid, busy, seq) VALUES (?, ?, ?)",
-                (buffer(nid), 1, seq)) 
+                (buffer(nid), 1, seq))
         else:
             self.cur.execute("UPDATE peers SET busy = 1 WHERE nid = ?", (buffer(nid),))
             seq = row[0]
-        
+
         if addr is not None:
             self.cur.execute("UPDATE ips SET ctime = ?, errors = 0 WHERE ip = ? AND port = ?",
                 (int(time.time()), addr[0], addr[1]))
@@ -108,7 +109,7 @@ class SyncStore(object):
         if nid is not None:
             self.cur.execute("UPDATE peers SET state = 0 WHERE nid = ?", (buffer(nid),))
         if addr is not None:
-            self.cur.execute("UPDATE ips SET busy = 0 WHERE ip = ? AND port = ?", addr) 
+            self.cur.execute("UPDATE ips SET busy = 0 WHERE ip = ? AND port = ?", addr)
 
     def on_seq_update(self, nid, seq):
         self.cur.execute("UPDATE peers SET seq = ? WHERE nid = ?", (buffer(nid), seq))

@@ -318,6 +318,7 @@ class DhtLocation(object):
     def found_peer(self, addr):
         if addr in self.peers:
             return
+        #pylint: disable=not-callable
         if self.on_found_peer is not None:
             self.on_found_peer(addr)
         logger.info("Found new peer: %s", addr)
