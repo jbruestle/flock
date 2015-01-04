@@ -35,6 +35,10 @@ class Connection(asynchat.async_chat):
         logger.warning("%s: got error: %s", id(self), sys.exc_info()[1])
         self.close()
 
+    def handle_close(self):
+        logger.info("%s: Got a close", id(self))
+        self.close()
+
     def collect_incoming_data(self, data):
         self.__ibuffer.append(data)
 
@@ -93,7 +97,7 @@ class SyncConnection(Connection):
         self.store.on_disconnect(self.addr, self.remote)
 
     def handle_close(self):
-        logger.info("%s: Got a close", id(self))
+        Connection.handle_close(self)
         self.store.on_disconnect(self.addr, self.remote)
 
     def on_hello(self, magic, remote):
