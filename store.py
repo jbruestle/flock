@@ -107,7 +107,7 @@ class SyncStore(object):
     def on_disconnect(self, addr, nid):
         logger.info("on_disconnect, addr = %s, nid = %s", addr, nid)
         if nid is not None:
-            self.cur.execute("UPDATE peers SET state = 0 WHERE nid = ?", (buffer(nid),))
+            self.cur.execute("UPDATE peers SET busy = 0 WHERE nid = ?", (buffer(nid),))
         if addr is not None:
             self.cur.execute("UPDATE ips SET busy = 0 WHERE ip = ? AND port = ?", addr)
 

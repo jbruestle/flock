@@ -31,7 +31,7 @@ class Connection(asynchat.async_chat):
         self.__fmt = None
 
     def handle_error(self):
-        #logger.warning("got error: %s", traceback.format_exc())
+        logger.warning("got error: %s", traceback.format_exc())
         self.close()
 
     def collect_incoming_data(self, data):
