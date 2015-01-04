@@ -11,7 +11,7 @@ import socket
 import unittest
 import logging
 import random
-import traceback
+import sys
 
 from worktoken import WorkToken
 from store import SyncStore
@@ -32,7 +32,7 @@ class Connection(asynchat.async_chat):
         self.__fmt = None
 
     def handle_error(self):
-        logger.warning("got error: %s", traceback.format_exc())
+        logger.warning("%s: got error: %s", id(self), sys.exc_info()[1])
         self.close()
 
     def collect_incoming_data(self, data):
@@ -89,13 +89,11 @@ class SyncConnection(Connection):
         self.recv_struct(HELLO_FMT, self.on_hello)
 
     def handle_error(self):
-        logger.debug("Got an error")
         Connection.handle_error(self)
         self.store.on_disconnect(self.addr, self.remote)
 
     def handle_close(self):
-        logger.debug("Got a close")
-        Connection.handle_error(self)
+        logger.info("%s: Got a close", id(self))
         self.store.on_disconnect(self.addr, self.remote)
 
     def on_hello(self, magic, remote):
@@ -210,30 +208,30 @@ class SyncPeerConn(SyncConnection):
             self.peer.asm.cancel(self.timer)
 
     def handle_error(self):
-        logger.info("Got an error, remote = %s", self.addr)
         SyncConnection.handle_error(self)
         self.on_done()
 
     def handle_close(self):
-        logger.info("Got a close, remote = %s", self.addr)
         SyncConnection.handle_close(self)
         self.on_done()
 
     def timeout(self):
         self.timer = None
         if self.remote is None:
-            logger.info("Negotiation not complete, remote = %s", self.addr)
+            logger.info("%s: Negotiation not complete, remote = %s", id(self), self.addr)
             self.close()
             self.handle_close()
 
 class SyncServerConn(SyncPeerConn):
     def __init__(self, peer, sock):
+        logger.info("Constructing server connection: %s", id(self))
         self.peer = peer
         SyncPeerConn.__init__(self, peer, sock, NEGOTIATE_TIMEOUT)
         self.start()
 
 class SyncClientConn(SyncPeerConn):
     def __init__(self, peer, addr):
+        logger.info("Constructing client connection to %s: %s", addr, id(self))
         self.peer = peer
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         SyncPeerConn.__init__(self, peer, sock, CONNECT_TIMEOUT + NEGOTIATE_TIMEOUT)
