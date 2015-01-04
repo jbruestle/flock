@@ -89,7 +89,10 @@ class SyncStore(object):
         return (ipaddr, port)
 
     def on_connect(self, addr, nid):
-        logger.info("on_connect, addr = %s, nid = %s", addr, nid)
+        nstr = None
+        if nid is not None:
+            nstr = nid.encode('hex')
+        logger.info("on_connect, addr = %s, nid = %s", addr, nstr)
         self.cur.execute("SELECT busy, seq from peers WHERE nid = ?", (buffer(nid),))
         row = self.cur.fetchone()
         if row is not None and row[0] == 1:
@@ -112,7 +115,10 @@ class SyncStore(object):
         return seq
 
     def on_disconnect(self, addr, nid):
-        logger.info("on_disconnect, addr = %s, nid = %s", addr, nid)
+        nstr = None
+        if nid is not None:
+            nstr = nid.encode('hex')
+        logger.info("on_disconnect, addr = %s, nid = %s", addr, nstr)
         if nid is not None:
             self.cur.execute("UPDATE peers SET busy = 0 WHERE nid = ?", (buffer(nid),))
         if addr is not None:
