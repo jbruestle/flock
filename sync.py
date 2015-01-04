@@ -11,6 +11,7 @@ import socket
 import unittest
 import logging
 import random
+import traceback
 
 from worktoken import WorkToken
 from store import SyncStore
