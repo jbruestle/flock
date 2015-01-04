@@ -65,7 +65,7 @@ class Connection(asynchat.async_chat):
         self.__term_callback = callback
         self.set_terminator(struct.calcsize(fmt))
 
-HELLO_FMT = '!4s32s'  # Magic #, ID
+HELLO_FMT = '!4s20s'  # Magic #, ID
 HELLO_ACK_FMT = '!QL'  # Seq No, Buffer size
 SUMMARY_FMT = '!Q32sQQ' # Seq No, Hash, Timestamp, Nonce
 DATA_HDR_FMT = '!H' # Data size

@@ -82,7 +82,7 @@ class SyncStore(object):
             logger.debug("Finding peers, no result")
             return None
         (ipaddr, port, dtime) = row
-        logger.debug("Finding peers: r = %s, dtime = %s", (ipaddr, port), dtime)
+        logger.info("Finding peers: r = %s, dtime = %s", (ipaddr, port), dtime)
         dtime *= 2
         self.cur.execute("UPDATE ips SET busy = 1, dtime = ? WHERE ip = ? AND port = ?",
             (dtime, ipaddr, port))
