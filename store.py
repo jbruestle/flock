@@ -26,7 +26,8 @@ class SyncStore(object):
         port   INTEGER,
         atime  INTEGER,
         ctime  INTEGER,
-        errors INTEGER,
+        dtime  INTEGER,
+        wtime  INTEGER,
         busy   INTEGER,
         PRIMARY KEY (ip, port)
     );
@@ -64,23 +65,27 @@ class SyncStore(object):
     def on_add_peer(self, addr):
         self.cur.execute(
             "INSERT OR IGNORE INTO ips "
-            "(ip, port, atime, ctime, errors, busy) "
-            "VALUES (?, ?, ?, NULL, 0, 0)",
+            "(ip, port, atime, ctime, dtime, wtime, busy) "
+            "VALUES (?, ?, ?, NULL, 0, 0, 0)",
             (addr[0], addr[1], int(time.time())))
 
     def find_peer(self):
         self.cur.execute(
-            "SELECT ip, port FROM ips " +
-            "WHERE busy = 0 ORDER BY " +
-            "errors ASC, IFNULL(ctime, 0) DESC, atime DESC LIMIT 1")
+            "DELETE FROM ips where wtime > ?", (time.time() + 15*60,))
+        self.cur.execute(
+            "SELECT ip, port, dtime FROM ips " +
+            "WHERE busy = 0 AND wtime < ? ORDER BY " +
+            "IFNULL(ctime, 0) DESC, atime DESC LIMIT 1",
+            (time.time(),))
         row = self.cur.fetchone()
         if row == None:
             logger.debug("Finding peers, no result")
             return None
-        (ipaddr, port) = row
+        (ipaddr, port, dtime) = row
         logger.debug("Finding peers: r = %s", (ipaddr, port))
-        self.cur.execute("UPDATE ips SET busy = 1, errors = errors + 1 WHERE ip = ? AND port = ?",
-            (ipaddr, port))
+        dtime *= 2
+        self.cur.execute("UPDATE ips SET busy = 1, dtime = ? WHERE ip = ? AND port = ?",
+            (dtime, ipaddr, port))
         return (ipaddr, port)
 
     def on_connect(self, addr, nid):
@@ -99,7 +104,7 @@ class SyncStore(object):
             seq = row[0]
 
         if addr is not None:
-            self.cur.execute("UPDATE ips SET ctime = ?, errors = 0 WHERE ip = ? AND port = ?",
+            self.cur.execute("UPDATE ips SET ctime = ?, dtime = 1 WHERE ip = ? AND port = ?",
                 (int(time.time()), addr[0], addr[1]))
 
         return seq
@@ -107,7 +112,8 @@ class SyncStore(object):
     def on_disconnect(self, addr, nid):
         logger.info("on_disconnect, addr = %s, nid = %s", addr, nid)
         if nid is not None:
-            self.cur.execute("UPDATE peers SET busy = 0 WHERE nid = ?", (buffer(nid),))
+            self.cur.execute("UPDATE peers SET busy = 0, wtime = dtime + ? WHERE nid = ?", 
+                (time.time(), buffer(nid)))
         if addr is not None:
             self.cur.execute("UPDATE ips SET busy = 0 WHERE ip = ? AND port = ?", addr)
 
