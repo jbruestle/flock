@@ -7,7 +7,9 @@ import hashlib
 import time
 import unittest
 import logging
-from worktoken import WorkToken
+import random
+
+RECORD_OVERHEAD = 100
 
 logger = logging.getLogger('store')
 
@@ -15,6 +17,7 @@ class SyncStore(object):
     internal_sql = '''
     CREATE TABLE records (
         seq    INTEGER PRIMARY KEY AUTOINCREMENT,
+        rtype  INTEGER,
         hid    TEXT,
         data   TEXT,
         time   INTEGER,
@@ -36,7 +39,7 @@ class SyncStore(object):
         busy   INTEGER,
         seq    INTEGER
     );
-    CREATE UNIQUE INDEX records_hid ON records (hid);
+    CREATE UNIQUE INDEX records_hid ON records (rtype, hid);
     CREATE INDEX records_score ON records (score);
     '''
 
@@ -46,7 +49,7 @@ class SyncStore(object):
         self.cur = self.con.cursor()
         self.cur.executescript(SyncStore.internal_sql)
         self.cur.execute(
-            "SELECT ifnull(sum(? + length(data)),0) FROM records", (WorkToken.overhead,))
+            "SELECT ifnull(sum(? + length(data)),0) FROM records", (RECORD_OVERHEAD,))
         self.cur_size = self.cur.fetchone()[0]
 
     def __shrink(self):
@@ -128,132 +131,143 @@ class SyncStore(object):
     def on_seq_update(self, nid, seq):
         self.cur.execute("UPDATE peers SET seq = ? WHERE nid = ?", (buffer(nid), seq))
 
-    def on_worktoken(self, wtok):
+    def on_summary(self, rtype, rsum, score):
+        (hid, wtime, nonce) = rsum 
         self.cur.execute(
             "SELECT score, data FROM records "
-            "WHERE hid = ?", (buffer(wtok.hid),))
+            "WHERE rtype = ? AND hid = ?", (rtype, buffer(hid)))
         row = self.cur.fetchone()
         if row == None:
             return True
-        (score, data) = row
-        if score >= wtok.score:
+        (cscore, data) = row
+        if cscore >= score:
             return False
         self.cur.execute(
             "REPLACE INTO records " +
-            "(hid, data, time, nonce, score) " +
-            "VALUES (?, ?, ?, ?, ?)",
-            (buffer(wtok.hid), buffer(data), wtok.time, wtok.nonce, wtok.score))
+            "(rtype, hid, data, time, nonce, score) " +
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (rtype, buffer(hid), buffer(data), wtime, nonce, score))
         return False
 
-    def on_record(self, wtok, data):
-        # Delete any existing version with lower WT
+    def on_record(self, rtype, rsum, score, data):
+        (hid, wtime, nonce) = rsum 
+        # Delete any existing version with lower score
         self.cur.execute(
             "DELETE FROM records " +
-            "WHERE hid = ? AND score < ?",
-            (buffer(wtok.hid), wtok.score))
+            "WHERE rtype = ? AND hid = ? AND score < ?",
+            (rtype, buffer(hid), score))
         if self.cur.rowcount > 0:
             self.cur_size -= 100 + len(data)
         # Insert new row if not already there
         self.cur.execute(
             "INSERT OR IGNORE INTO records " +
-            "(hid, data, time, nonce, score) " +
-            "VALUES (?, ?, ?, ?, ?)",
-            (buffer(wtok.hid), buffer(data), wtok.time, wtok.nonce, wtok.score))
+            "(rtype, hid, data, time, nonce, score) " +
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (rtype, buffer(hid), buffer(data), wtime, nonce, score))
         if self.cur.rowcount > 0:
             self.cur_size += 100 + len(data)
         # Shrink as needed
         self.__shrink()
 
-    def get_worktoken(self, seq):
+    def get_summary(self, seq):
         self.cur.execute(
-            "SELECT seq, hid, time, nonce " +
+            "SELECT seq, rtype, hid, time, nonce " +
             "FROM records WHERE seq > ? " +
             "LIMIT 1", (seq,))
         row = self.cur.fetchone()
         if row is None:
-            return None, None
-        (rseq, hid, wtime, nonce) = row
-        return (rseq, WorkToken(str(hid), wtime, nonce))
+            return None, None, None
+        (rseq, rtype, hid, wtime, nonce) = row
+        rsum = (str(hid), wtime, nonce)
+        return (rseq, rtype, rsum)
 
-    def get_data(self, hid):
-        self.cur.execute("SELECT data FROM records WHERE hid = ?", (buffer(hid),))
+    def get_data(self, rtype, hid):
+        self.cur.execute("SELECT data FROM records WHERE rtype = ? AND hid = ?", 
+            (rtype, buffer(hid)))
         row = self.cur.fetchone()
         if row is None:
             return None
         return str(row[0])
 
 class TestSyncStore(unittest.TestCase):
+    def __make_sum(self, data):
+        hid = hashlib.sha256(data).digest()
+        wtime = int(time.time())
+        nonce = random.randint(0, 1000)
+        rsum = (hid, wtime, nonce)
+        return rsum
+
     def test_ordered(self):
         # Make a SyncStore that holds 20 objects
-        store = SyncStore(":memory:", WorkToken.overhead * 21)
+        store = SyncStore(":memory:", RECORD_OVERHEAD* 21)
         all_data = []
         # Make 30 random entries and insert them
         for i in range(30):
             data = str(i)
-            hid = hashlib.sha256(data).digest()
-            wtok = WorkToken(hid)
-            all_data.append((wtok, data))
-            store.on_record(wtok, data)
+            rsum = self.__make_sum(data)
+            score = random.random()
+            all_data.append((rsum, score, data))
+            store.on_record(0, rsum, score, data)
         # Sort entries by score
-        all_data.sort(key=lambda x: x[0].score)
+        all_data.sort(key=lambda x: x[1])
         # Check the the right elements are there
         for i in range(10):
-            self.assertTrue(store.get_data(all_data[i][0].hid) == None)
+            self.assertTrue(store.get_data(0, all_data[i][0][0]) == None)
         for i in range(10, 30):
-            self.assertTrue(store.get_data(all_data[i][0].hid) == all_data[i][1])
+            self.assertTrue(store.get_data(0, all_data[i][0][0]) == all_data[i][2])
 
     def test_update(self):
         # Make a SyncStore that holds 20 objects
-        store = SyncStore(":memory:", WorkToken.overhead * 21)
+        store = SyncStore(":memory:", RECORD_OVERHEAD * 21)
         all_data = []
         # Make 20 random entries and insert them
         for i in range(20):
             data = str(i)
-            hid = hashlib.sha256(data).digest()
-            wtok = WorkToken(hid)
-            all_data.append((wtok, data))
-            store.on_record(wtok, data)
-        # 'Mine' for the first 10 and update WT
+            rsum = self.__make_sum(data)
+            score = random.random()
+            all_data.append((rsum, score, data))
+            store.on_record(0, rsum, score, data)
+        # 'Increase score' for the first 10 and update WT
         for i in range(10):
-            all_data[i][0].mine(1000)
-            store.on_worktoken(all_data[i][0])
+            store.on_summary(0, all_data[i][0], all_data[i][1] + 10)
         # Now add 10 more 'premined' values
         for i in range(10):
             data = str(20 + i)
-            hid = hashlib.sha256(data).digest()
-            wtok = WorkToken(hid)
-            wtok.mine(1000)
-            store.on_record(wtok, data)
+            rsum = self.__make_sum(data)
+            score = random.random() + 10
+            all_data.append((rsum, score, data))
+            store.on_record(0, rsum, score, data)
         # Check that right elements survived
         for i in range(10):
-            self.assertTrue(store.get_data(all_data[i][0].hid) == all_data[i][1])
+            self.assertTrue(store.get_data(0, all_data[i][0][0]) == all_data[i][2])
         for i in range(10, 20):
-            self.assertTrue(store.get_data(all_data[i][0].hid) == None)
+            self.assertTrue(store.get_data(0, all_data[i][0][0]) == None)
 
-    def test_get_worktoken(self):
+    def test_get_summary(self):
         # Make a SyncStore that holds 20 objects
-        store = SyncStore(":memory:", WorkToken.overhead * 21)
+        store = SyncStore(":memory:", RECORD_OVERHEAD * 21)
         all_data = []
         # Make 20 random entries and insert them
         for i in range(20):
             data = str(i)
-            hid = hashlib.sha256(data).digest()
-            wtok = WorkToken(hid)
-            all_data.append((wtok, data))
-            store.on_record(wtok, data)
+            rsum = self.__make_sum(data)
+            score = random.random() + 10
+            all_data.append((rsum, score, data))
+            store.on_record(0, rsum, score, data)
         # 'Mine' for the first 10 and update WT
         for i in range(10):
-            all_data[i][0].mine(1000)
-            store.on_worktoken(all_data[i][0])
+            store.on_summary(0, all_data[i][0], all_data[i][1] + 10)
         # Check for order of 'events'
         seq = 0
         for i in range(10):
-            (seq, wtok) = store.get_worktoken(seq)
-            self.assertTrue(wtok.hid == all_data[i + 10][0].hid)
+            (seq, rtype, rsum) = store.get_summary(seq)
+            self.assertTrue(rtype == 0)
+            self.assertTrue(rsum == all_data[i + 10][0])
         for i in range(10, 20):
-            (seq, wtok) = store.get_worktoken(seq)
-            self.assertTrue(wtok.hid == all_data[i - 10][0].hid)
-        self.assertTrue(store.get_worktoken(seq)[0] is None)
+            (seq, rtype, rsum) = store.get_summary(seq)
+            self.assertTrue(rtype == 0)
+            self.assertTrue(rsum == all_data[i - 10][0])
+        self.assertTrue(store.get_summary(seq)[0] is None)
 
 if __name__ == '__main__':
     unittest.main()

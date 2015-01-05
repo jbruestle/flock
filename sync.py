@@ -71,7 +71,7 @@ class Connection(asynchat.async_chat):
 
 HELLO_FMT = '!4s20s'  # Magic #, ID
 HELLO_ACK_FMT = '!QL'  # Seq No, Buffer size
-SUMMARY_FMT = '!Q32sQQ' # Seq No, Hash, Timestamp, Nonce
+SUMMARY_FMT = '!QB32sQQ' # Seq No, Hash, Timestamp, Nonce
 DATA_HDR_FMT = '!H' # Data size
 ADVANCE_FMT = '!?'
 
@@ -87,6 +87,12 @@ class SyncConnection(Connection):
         self.max_outstanding = 0
         self.send_seq = 0
         self.recv_seq = None
+
+    def compute_score(self, rtype, rsum):
+        return 1.0
+
+    def validate(self, rtype, rsum, data):
+        return True 
 
     def start(self):
         self.send_struct(HELLO_FMT, '0net', self.nid)
@@ -137,13 +143,14 @@ class SyncConnection(Connection):
         else:
             raise ValueError('Invalid type')
 
-    def on_summary(self, seq, hid, timestamp, nonce):
+    def on_summary(self, seq, rtype, hid, timestamp, nonce):
         _ = seq
-        wtok = WorkToken(hid, timestamp, nonce)
-        need_data = self.store.on_worktoken(wtok)
+        rsum = (hid, timestamp, nonce)
+        score = self.compute_score(rtype, rsum)
+        need_data = self.store.on_summary(rtype, rsum, score)
         if need_data:
             logger.debug("requesting data")
-            self.await_data.append((seq, wtok))
+            self.await_data.append((seq, rtype, rsum, score))
             self.send_buffer('N')
         else:
             self.send_buffer('O')
@@ -152,15 +159,15 @@ class SyncConnection(Connection):
         self.recv_buffer(1, self.on_type)
 
     def on_data_header(self, dsize):
-        (_, wtok) = self.await_data.popleft()
-        callback = lambda data: self.on_data(wtok, data)
+        (_, rtype, rsum, score) = self.await_data.popleft()
+        callback = lambda data: self.on_data(rtype, rsum, score, data)
         self.recv_buffer(dsize, callback)
 
-    def on_data(self, wtok, data):
+    def on_data(self, rtype, rsum, score, data):
         logger.debug("adding data")
-        if hashlib.sha256(data).digest() != wtok.hid:
-            raise ValueError("Data-hash mismatch, erroring connection")
-        self.store.on_record(wtok, data)
+        if not self.validate(rtype, rsum, data):
+            raise ValueError("Validation failure, erroring connection")
+        self.store.on_record(rtype, rsum, score, data)
         self.update_seq()
         self.recv_buffer(1, self.on_type)
 
@@ -174,9 +181,9 @@ class SyncConnection(Connection):
 
     def on_advance(self, need_data):
         logger.debug("Got advance")
-        hid = self.await_advance.popleft()
+        (rtype, hid) = self.await_advance.popleft()
         if need_data:
-            data = self.store.get_data(hid)
+            data = self.store.get_data(rtype, hid)
             if data == None:
                 logger.debug("sending R")
                 self.send_buffer('R')
@@ -190,15 +197,15 @@ class SyncConnection(Connection):
 
     def fill_queue(self):
         while len(self.await_advance) < self.max_outstanding:
-            (seq, wtok) = self.store.get_worktoken(self.send_seq)
-            if wtok is None:
-                logger.debug("got null wtok")
+            (seq, rtype, rsum) = self.store.get_summary(self.send_seq)
+            if seq is None:
+                logger.debug("got null seq")
                 break
             self.send_seq = seq
             logger.debug("sending seq %s", seq)
-            self.await_advance.append(wtok.hid)
+            self.await_advance.append((rtype, rsum[0]))
             self.send_buffer("S")
-            self.send_struct(SUMMARY_FMT, seq, wtok.hid, wtok.time, wtok.nonce)
+            self.send_struct(SUMMARY_FMT, seq, rtype, rsum[0], rsum[1], rsum[2])
 
 class SyncPeerConn(SyncConnection):
     def __init__(self, peer, sock, timeout):
@@ -291,9 +298,12 @@ class TestSync(unittest.TestCase):
     def add_data(all_data, store, num):
         data = str(num)
         hid = hashlib.sha256(data).digest()
-        wtok = WorkToken(hid)
-        all_data.append((wtok, data))
-        store.on_record(wtok, data)
+        rtime = int(time.time())
+        nonce = random.randint(0, 1000)
+        score = random.random()
+        rsum = (hid, rtime, nonce)
+        all_data.append(hid)
+        store.on_record(0, rsum, score, data)
 
     def test_simple(self):
         # Make room for 40 cakes
@@ -317,8 +327,8 @@ class TestSync(unittest.TestCase):
         asyncore.loop(timeout=1, count=5)
         # Check the client has records
         for i in range(40):
-            self.assertTrue(ss1.get_data(all_data[i][0].hid) is not None)
-            self.assertTrue(ss2.get_data(all_data[i][0].hid) is not None)
+            self.assertTrue(ss1.get_data(0, all_data[i]) is not None)
+            self.assertTrue(ss2.get_data(0, all_data[i]) is not None)
 
     @staticmethod
     def make_node(asm, store, port):
@@ -351,8 +361,8 @@ class TestSync(unittest.TestCase):
         node1.add_peer(('127.0.0.1', 6001))
         asm.run(20.0)
         for i in range(40):
-            self.assertTrue(ss1.get_data(all_data[i][0].hid) is not None)
-            self.assertTrue(ss2.get_data(all_data[i][0].hid) is not None)
+            self.assertTrue(ss1.get_data(0, all_data[i]) is not None)
+            self.assertTrue(ss2.get_data(0, all_data[i]) is not None)
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
