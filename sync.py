@@ -75,12 +75,12 @@ DATA_HDR_FMT = '!H' # Data size
 ADVANCE_FMT = '!?'
 
 class SyncConnection(Connection):
-    def __init__(self, nid, sstore, sock, map=None):
+    def __init__(self, nid, store, sock, map=None):
         Connection.__init__(self, sock, map=map)
         self.nid = nid
         self.remote = None
         self.addr = None
-        self.store = sstore
+        self.store = store
         self.await_advance = collections.deque()
         self.await_data = collections.deque()
         self.max_outstanding = 0
@@ -99,11 +99,13 @@ class SyncConnection(Connection):
 
     def handle_error(self):
         Connection.handle_error(self)
-        self.store.on_disconnect(self.addr, self.remote)
+        if self.store is not None:
+            self.store.on_disconnect(self.addr, self.remote)
 
     def handle_close(self):
         Connection.handle_close(self)
-        self.store.on_disconnect(self.addr, self.remote)
+        if self.store is not None:
+            self.store.on_disconnect(self.addr, self.remote)
 
     def on_hello(self, magic, remote):
         logger.debug("Got hello")
@@ -207,13 +209,12 @@ class SyncConnection(Connection):
             self.send_struct(SUMMARY_FMT, seq, rtype, rsum[0], rsum[1], rsum[2])
 
 class SyncPeerConn(SyncConnection):
-    def __init__(self, peer, sock, timeout):
+    def __init__(self, peer, sock, store, timeout):
         self.peer = peer
-        SyncConnection.__init__(self, peer.nid, peer.store, sock, map=peer.asm.async_map)
+        SyncConnection.__init__(self, peer.nid, store, sock, map=peer.asm.async_map)
         self.timer = peer.asm.add_timer(time.time() + timeout, self.timeout)
 
     def on_done(self):
-        self.peer.on_disconnect()
         if self.timer is not None:
             self.peer.asm.cancel(self.timer)
 
@@ -236,61 +237,65 @@ class SyncServerConn(SyncPeerConn):
     def __init__(self, peer, sock):
         logger.info("Constructing server connection: %s", id(self))
         self.peer = peer
-        SyncPeerConn.__init__(self, peer, sock, NEGOTIATE_TIMEOUT)
+        SyncPeerConn.__init__(self, peer, sock, None, NEGOTIATE_TIMEOUT)
+        self.recv_buffer(20, self.on_tid)
+
+    def on_tid(self, tid):
+        logger.info("%s: received tid: %s", id(self), tid.encode('hex')) 
+        if tid not in self.peer.stores:
+            raise ValueError('Unknown tid')
+        self.store = self.peer.stores[tid]
+        if self.store.connections >= MAX_PEERS:
+            raise ValueError('Too many connections')
         self.start()
 
 class SyncClientConn(SyncPeerConn):
-    def __init__(self, peer, addr):
+    def __init__(self, peer, tid, addr):
         logger.info("Constructing client connection to %s: %s", addr, id(self))
         self.peer = peer
+        self.tid = tid
+        store = peer.stores[tid]
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        SyncPeerConn.__init__(self, peer, sock, CONNECT_TIMEOUT + NEGOTIATE_TIMEOUT)
+        SyncPeerConn.__init__(self, peer, sock, store, CONNECT_TIMEOUT + NEGOTIATE_TIMEOUT)
         self.addr = addr
         self.connect(addr)
 
     def handle_connect(self):
+        logger.info("%s: sending tid: %s", id(self), self.tid.encode('hex'))
+        self.send_buffer(self.tid)
         self.start()
 
 class SyncPeer(asyncore.dispatcher):
-    def __init__(self, asm, nid, store, sock):
+    def __init__(self, asm, nid, stores, sock):
         self.asm = asm
-        self.store = store
+        self.stores = stores
         self.nid = nid
-        self.store.clear_conn_state()
-        self.connections = 0
         asyncore.dispatcher.__init__(self, sock=sock, map=self.asm.async_map)
         self.listen(5)
 
         self.asm.add_timer(time.time() + 1, self.on_timer)
 
-    def add_peer(self, addr):
-        self.store.on_add_peer(addr)
+    def add_peer(self, tid, addr):
+        self.stores[tid].on_add_peer(addr)
 
     def on_timer(self):
         self.asm.add_timer(time.time() + 1, self.on_timer)
-        if self.connections >= GOAL_PEERS:
-            return
-        peer = self.store.find_peer()
-        if peer == None:
-            return
-        self.connections += 1
-        logger.info("Making connection to %s", peer)
-        _ = SyncClientConn(self, peer)
+        for tid, store in self.stores.iteritems():
+            if store.connections >= GOAL_PEERS:
+                return
+            peer = store.find_peer()
+            if peer == None:
+                return
+            logger.info("Making connection to %s", peer)
+            _ = SyncClientConn(self, tid, peer)
 
     def handle_accept(self):
         pair = self.accept()
         if pair is None:
             return
         (sock, addr) = pair
-        if self.connections >= MAX_PEERS:
-            sock.close()
-            return
-        self.connections += 1
         logger.info("Incoming connection from %s", addr)
         _ = SyncServerConn(self, sock)
-
-    def on_disconnect(self):
-        self.connections -= 1
 
 class TestSync(unittest.TestCase):
     @staticmethod
@@ -336,7 +341,9 @@ class TestSync(unittest.TestCase):
         local = ('', port)
         sock.bind(local)
         nid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
-        return SyncPeer(asm, nid, store, sock)
+        stores = {}
+        stores['aaaabbbbcccceeeeffff'] = store
+        return SyncPeer(asm, nid, stores, sock)
 
     def test_node(self):
         asm = async.AsyncMgr()
@@ -355,9 +362,9 @@ class TestSync(unittest.TestCase):
         local = ('', 7001)
         sock.bind(local)
         sock.listen(5)
-        node1.add_peer(('127.0.0.1', 8001))
-        node1.add_peer(('127.0.0.1', 7001))
-        node1.add_peer(('127.0.0.1', 6001))
+        node1.add_peer('aaaabbbbcccceeeeffff', ('127.0.0.1', 8001))
+        node1.add_peer('aaaabbbbcccceeeeffff',('127.0.0.1', 7001))
+        node1.add_peer('aaaabbbbcccceeeeffff',('127.0.0.1', 6001))
         asm.run(20.0)
         for i in range(40):
             self.assertTrue(ss1.get_data(0, all_data[i]) is not None)

@@ -51,6 +51,9 @@ class SyncStore(object):
         self.cur.execute(
             "SELECT ifnull(sum(? + length(data)),0) FROM records", (RECORD_OVERHEAD,))
         self.cur_size = self.cur.fetchone()[0]
+        self.cur.execute("UPDATE ips SET busy = 0")
+        self.cur.execute("UPDATE peers SET busy = 0")
+        self.connections = 0
 
     def __shrink(self):
         while self.cur_size > self.max_size:
@@ -61,9 +64,6 @@ class SyncStore(object):
             self.cur_size -= size
             self.cur.execute("DELETE FROM records WHERE seq = ?", (seq,))
 
-    def clear_conn_state(self):
-        self.cur.execute("UPDATE ips SET busy = 0")
-        self.cur.execute("UPDATE peers SET busy = 0")
 
     def on_add_peer(self, addr):
         self.cur.execute(
@@ -89,6 +89,8 @@ class SyncStore(object):
         dtime *= 2
         self.cur.execute("UPDATE ips SET busy = 1, dtime = ? WHERE ip = ? AND port = ?",
             (dtime, ipaddr, port))
+        self.connections += 1
+        logger.info("Connections = %d", self.connections)
         return (ipaddr, port)
 
     def on_connect(self, addr, nid):
@@ -114,14 +116,19 @@ class SyncStore(object):
                 "UPDATE ips SET ctime = ?, dtime = 1, wtime = 0 " +
                 "WHERE ip = ? AND port = ?",
                 (int(time.time()), addr[0], addr[1]))
+        else:
+            self.connections += 1
+            logger.info("Connections = %d", self.connections)
 
         return seq
 
     def on_disconnect(self, addr, nid):
+        self.connections -= 1
         nstr = None
         if nid is not None:
             nstr = nid.encode('hex')
         logger.info("on_disconnect, addr = %s, nid = %s", addr, nstr)
+        logger.info("Connections = %d", self.connections)
         if nid is not None:
             self.cur.execute("UPDATE peers SET busy = 0 WHERE nid = ?", (buffer(nid),))
         if addr is not None:
