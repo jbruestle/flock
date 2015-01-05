@@ -1,7 +1,7 @@
 #!/usr/bin/python
 #pylint: disable=missing-docstring
 
-from collections import deque
+import collections
 import time
 import asyncore
 import asynchat
@@ -13,9 +13,8 @@ import logging
 import random
 import sys
 
-from worktoken import WorkToken
-from store import SyncStore
-from async import AsyncMgr
+import store
+import async
 
 logger = logging.getLogger('sync')
 
@@ -82,8 +81,8 @@ class SyncConnection(Connection):
         self.remote = None
         self.addr = None
         self.store = sstore
-        self.await_advance = deque()
-        self.await_data = deque()
+        self.await_advance = collections.deque()
+        self.await_data = collections.deque()
         self.max_outstanding = 0
         self.send_seq = 0
         self.recv_seq = None
@@ -307,13 +306,13 @@ class TestSync(unittest.TestCase):
 
     def test_simple(self):
         # Make room for 40 cakes
-        ss1 = SyncStore(":memory:", WorkToken.overhead * 41)
+        ss1 = store.SyncStore(":memory:", store.RECORD_OVERHEAD * 41)
         # Insert some records
         all_data = []
         for i in range(20):
             TestSync.add_data(all_data, ss1, i)
         # Make something to sync it to
-        ss2 = SyncStore(":memory:", WorkToken.overhead * 41)
+        ss2 = store.SyncStore(":memory:", store.RECORD_OVERHEAD * 41)
         # Make some fake socket action
         for i in range(20, 40):
             TestSync.add_data(all_data, ss2, i)
@@ -340,9 +339,9 @@ class TestSync(unittest.TestCase):
         return SyncPeer(asm, nid, store, sock)
 
     def test_node(self):
-        asm = AsyncMgr()
-        ss1 = SyncStore(":memory:", WorkToken.overhead * 41)
-        ss2 = SyncStore(":memory:", WorkToken.overhead * 41)
+        asm = async.AsyncMgr()
+        ss1 = store.SyncStore(":memory:", store.RECORD_OVERHEAD * 41)
+        ss2 = store.SyncStore(":memory:", store.RECORD_OVERHEAD * 41)
         node1 = TestSync.make_node(asm, ss1, 6000)
         node2 = TestSync.make_node(asm, ss2, 6001)
         all_data = []
