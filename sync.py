@@ -12,9 +12,11 @@ import unittest
 import logging
 import random
 import sys
+from Crypto.PublicKey import RSA
 
 import store
 import async
+import worktoken
 
 logger = logging.getLogger('sync')
 
@@ -88,10 +90,51 @@ class SyncConnection(Connection):
         self.recv_seq = None
 
     def compute_score(self, rtype, rsum):
-        return 1.0
+        (hid, wtime, nonce) = rsum
+        if rtype == 0:
+            return 1e20
+        if rtype == 1:
+            return wtime + 1e9
+        if rtype == 2:
+            wt = worktoken.WorkToken(hid, wtime, nonce)
+            return wt.score
+        return 0.0
+
+    def validate_pubkey(self, rsum, data):
+        # Check owner public key
+        (hid, wtime, nonce) = rsum
+        # Must have all 0 key
+        if hid != chr(0) * 32:
+            return False
+        # Must have 0's for wtime + nonce
+        if wtime != 0 or Nonce != 0:
+            return False
+        # Must hash to the tid 
+        hval = hashlib.sha256(data).digest()
+        if hval[0:20] != self.tid:
+            return False
+        # Must decode to an RSA public key 
+        try:
+            rsa = RSA.importKey("DER")
+        except ValueError:
+            return False
+        if rsa.has_private():
+            return False
+        # Looks good
+        return True
+
+    def validate_owner_record(self, rsum, data):
+        # TODO: Implement 
+        return True
 
     def validate(self, rtype, rsum, data):
-        return True 
+        if rtype == 0:
+            return self.validate_pubkey(rsum, data)
+        if rtype == 1:
+            return self.validate_owner_record(rsum, data)
+        if rtype == 2:
+            return rsum[0] == hashlib.sha256(data).digest()
+        return False 
 
     def start(self):
         self.send_struct(HELLO_FMT, '0net', self.nid)
@@ -302,12 +345,10 @@ class TestSync(unittest.TestCase):
     def add_data(all_data, store, num):
         data = str(num)
         hid = hashlib.sha256(data).digest()
-        rtime = int(time.time())
-        nonce = random.randint(0, 1000)
-        score = random.random()
-        rsum = (hid, rtime, nonce)
+        wtok = worktoken.WorkToken(hid)
+        rsum = (hid, wtok.time, wtok.nonce)
         all_data.append(hid)
-        store.on_record(0, rsum, score, data)
+        store.on_record(2, rsum, wtok.score, data)
 
     def test_simple(self):
         # Make room for 40 cakes
@@ -331,8 +372,8 @@ class TestSync(unittest.TestCase):
         asyncore.loop(timeout=1, count=5)
         # Check the client has records
         for i in range(40):
-            self.assertTrue(ss1.get_data(0, all_data[i]) is not None)
-            self.assertTrue(ss2.get_data(0, all_data[i]) is not None)
+            self.assertTrue(ss1.get_data(2, all_data[i]) is not None)
+            self.assertTrue(ss2.get_data(2, all_data[i]) is not None)
 
     @staticmethod
     def make_node(asm, store, port):
@@ -367,8 +408,8 @@ class TestSync(unittest.TestCase):
         node1.add_peer('aaaabbbbcccceeeeffff',('127.0.0.1', 6001))
         asm.run(20.0)
         for i in range(40):
-            self.assertTrue(ss1.get_data(0, all_data[i]) is not None)
-            self.assertTrue(ss2.get_data(0, all_data[i]) is not None)
+            self.assertTrue(ss1.get_data(2, all_data[i]) is not None)
+            self.assertTrue(ss2.get_data(2, all_data[i]) is not None)
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
