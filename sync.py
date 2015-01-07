@@ -25,60 +25,15 @@ MAX_PEERS = 20
 CONNECT_TIMEOUT = 5
 NEGOTIATE_TIMEOUT = 2 
 
-class Connection(asynchat.async_chat):
-    def __init__(self, sock, map=None):
-        asynchat.async_chat.__init__(self, sock=sock, map=map)
-        self.__term_callback = None
-        self.__ibuffer = []
-        self.__fmt = None
-
-    def handle_error(self):
-        logger.warning("%s: got error: %s", id(self), sys.exc_info()[1])
-        self.close()
-
-    def handle_close(self):
-        logger.info("%s: Got a close", id(self))
-        self.close()
-
-    def collect_incoming_data(self, data):
-        self.__ibuffer.append(data)
-
-    def found_terminator(self):
-        #pylint: disable=star-args
-        if self.__fmt is None:
-            self.__term_callback("".join(self.__ibuffer))
-        else:
-            params = struct.unpack(self.__fmt, "".join(self.__ibuffer))
-            self.__term_callback(*params)
-
-    def send_buffer(self, buf):
-        self.push(buf)
-
-    def send_struct(self, fmt, *t):
-        buf = struct.pack(fmt, *t)
-        self.push(buf)
-
-    def recv_buffer(self, size, callback):
-        self.__ibuffer = []
-        self.__fmt = None
-        self.__term_callback = callback
-        self.set_terminator(size)
-
-    def recv_struct(self, fmt, callback):
-        self.__ibuffer = []
-        self.__fmt = fmt
-        self.__term_callback = callback
-        self.set_terminator(struct.calcsize(fmt))
-
 HELLO_FMT = '!4s20s'  # Magic #, ID
 HELLO_ACK_FMT = '!QL'  # Seq No, Buffer size
 SUMMARY_FMT = '!QB32sQQ' # Seq No, Hash, Timestamp, Nonce
 DATA_HDR_FMT = '!H' # Data size
 ADVANCE_FMT = '!?'
 
-class SyncConnection(Connection):
+class SyncConnection(async.Connection):
     def __init__(self, nid, store, sock, map=None):
-        Connection.__init__(self, sock, map=map)
+        async.Connection.__init__(self, sock, map=map)
         self.nid = nid
         self.remote = None
         self.addr = None
@@ -141,12 +96,12 @@ class SyncConnection(Connection):
         self.recv_struct(HELLO_FMT, self.on_hello)
 
     def handle_error(self):
-        Connection.handle_error(self)
+        async.Connection.handle_error(self)
         if self.store is not None:
             self.store.on_disconnect(self.addr, self.remote)
 
     def handle_close(self):
-        Connection.handle_close(self)
+        async.Connection.handle_close(self)
         if self.store is not None:
             self.store.on_disconnect(self.addr, self.remote)
 
