@@ -16,7 +16,7 @@ from Crypto.PublicKey import RSA
 
 import store
 import async
-import worktoken
+import record
 
 logger = logging.getLogger('sync')
 
@@ -27,7 +27,7 @@ NEGOTIATE_TIMEOUT = 2
 
 HELLO_FMT = '!4s20s'  # Magic #, ID
 HELLO_ACK_FMT = '!QL'  # Seq No, Buffer size
-SUMMARY_FMT = '!QB32sQQ' # Seq No, Hash, Timestamp, Nonce
+SUMMARY_HDR_FMT = '!QB32sB' # Seq No, RType, Hash, Summary Size
 DATA_HDR_FMT = '!H' # Data size
 ADVANCE_FMT = '!?'
 
@@ -43,53 +43,6 @@ class SyncConnection(async.Connection):
         self.max_outstanding = 0
         self.send_seq = 0
         self.recv_seq = None
-
-    def compute_score(self, rtype, rsum):
-        (hid, wtime, nonce) = rsum
-        if rtype == 0:
-            return 1e20
-        if rtype == 1:
-            return wtime + 1e9
-        if rtype == 2:
-            wt = worktoken.WorkToken(hid, wtime, nonce)
-            return wt.score
-        return 0.0
-
-    def validate_pubkey(self, rsum, data):
-        # Check owner public key
-        (hid, wtime, nonce) = rsum
-        # Must have all 0 key
-        if hid != chr(0) * 32:
-            return False
-        # Must have 0's for wtime + nonce
-        if wtime != 0 or Nonce != 0:
-            return False
-        # Must hash to the tid 
-        hval = hashlib.sha256(data).digest()
-        if hval[0:20] != self.tid:
-            return False
-        # Must decode to an RSA public key 
-        try:
-            rsa = RSA.importKey("DER")
-        except ValueError:
-            return False
-        if rsa.has_private():
-            return False
-        # Looks good
-        return True
-
-    def validate_owner_record(self, rsum, data):
-        # TODO: Implement 
-        return True
-
-    def validate(self, rtype, rsum, data):
-        if rtype == 0:
-            return self.validate_pubkey(rsum, data)
-        if rtype == 1:
-            return self.validate_owner_record(rsum, data)
-        if rtype == 2:
-            return rsum[0] == hashlib.sha256(data).digest()
-        return False 
 
     def start(self):
         self.send_struct(HELLO_FMT, '0net', self.nid)
@@ -129,7 +82,7 @@ class SyncConnection(async.Connection):
     def on_type(self, buf):
         logger.debug("Got type %s", buf)
         if buf[0] == 'S':
-            self.recv_struct(SUMMARY_FMT, self.on_summary)
+            self.recv_struct(SUMMARY_HDR_FMT, self.on_summary_header)
         elif buf[0] == 'D':
             self.recv_struct(DATA_HDR_FMT, self.on_data_header)
         elif buf[0] == 'R':
@@ -142,14 +95,15 @@ class SyncConnection(async.Connection):
         else:
             raise ValueError('Invalid type')
 
-    def on_summary(self, seq, rtype, hid, timestamp, nonce):
-        _ = seq
-        rsum = (hid, timestamp, nonce)
-        score = self.compute_score(rtype, rsum)
-        need_data = self.store.on_summary(rtype, rsum, score)
+    def on_summary_header(self, seq, rtype, hid, slen):
+        callback = lambda summary: self.on_summary(seq, rtype, hid, summary)
+        self.recv_buffer(slen, callback)
+        
+    def on_summary(self, seq, rtype, hid, summary):
+        need_data = self.store.on_summary(rtype, hid, summary)
         if need_data:
             logger.debug("requesting data")
-            self.await_data.append((seq, rtype, rsum, score))
+            self.await_data.append((rtype, hid, summary))
             self.send_buffer('N')
         else:
             self.send_buffer('O')
@@ -158,15 +112,14 @@ class SyncConnection(async.Connection):
         self.recv_buffer(1, self.on_type)
 
     def on_data_header(self, dsize):
-        (_, rtype, rsum, score) = self.await_data.popleft()
-        callback = lambda data: self.on_data(rtype, rsum, score, data)
+        (rtype, hid, summary) = self.await_data.popleft()
+        callback = lambda data: self.on_data(rtype, hid, summary, data)
         self.recv_buffer(dsize, callback)
 
-    def on_data(self, rtype, rsum, score, data):
+    def on_data(self, rtype, hid, summary, data):
         logger.debug("adding data")
-        if not self.validate(rtype, rsum, data):
+        if not self.store.on_record(rtype, hid, summary, data):
             raise ValueError("Validation failure, erroring connection")
-        self.store.on_record(rtype, rsum, score, data)
         self.update_seq()
         self.recv_buffer(1, self.on_type)
 
@@ -182,7 +135,7 @@ class SyncConnection(async.Connection):
         logger.debug("Got advance")
         (rtype, hid) = self.await_advance.popleft()
         if need_data:
-            data = self.store.get_data(rtype, hid)
+            data = self.store.get_raw_data(rtype, hid)
             if data == None:
                 logger.debug("sending R")
                 self.send_buffer('R')
@@ -196,15 +149,16 @@ class SyncConnection(async.Connection):
 
     def fill_queue(self):
         while len(self.await_advance) < self.max_outstanding:
-            (seq, rtype, rsum) = self.store.get_summary(self.send_seq)
+            (seq, rtype, hid, summary) = self.store.get_summary(self.send_seq)
             if seq is None:
                 logger.debug("got null seq")
                 break
             self.send_seq = seq
             logger.debug("sending seq %s", seq)
-            self.await_advance.append((rtype, rsum[0]))
+            self.await_advance.append((rtype, hid))
             self.send_buffer("S")
-            self.send_struct(SUMMARY_FMT, seq, rtype, rsum[0], rsum[1], rsum[2])
+            self.send_struct(SUMMARY_HDR_FMT, seq, rtype, hid, len(summary))
+            self.send_buffer(summary)
 
 class SyncPeerConn(SyncConnection):
     def __init__(self, peer, sock, store, timeout):
@@ -298,22 +252,21 @@ class SyncPeer(asyncore.dispatcher):
 class TestSync(unittest.TestCase):
     @staticmethod
     def add_data(all_data, store, num):
-        data = str(num)
-        hid = hashlib.sha256(data).digest()
-        wtok = worktoken.WorkToken(hid)
-        rsum = (hid, wtok.time, wtok.nonce)
+        (hid, summary, body) = record.make_worktoken_record('text/plain', str(num))
         all_data.append(hid)
-        store.on_record(2, rsum, wtok.score, data)
+        store.on_record(record.RT_WORKTOKEN, hid, summary, body)
 
     def test_simple(self):
         # Make room for 40 cakes
-        ss1 = store.SyncStore(":memory:", store.RECORD_OVERHEAD * 41)
+        tid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
+        ss1 = store.SyncStore(tid, ":memory:", 21 * (len('text/plain') + store.RECORD_OVERHEAD))
         # Insert some records
         all_data = []
         for i in range(20):
             TestSync.add_data(all_data, ss1, i)
         # Make something to sync it to
-        ss2 = store.SyncStore(":memory:", store.RECORD_OVERHEAD * 41)
+        tid2 = ''.join(chr(random.randint(0, 255)) for _ in range(20))
+        ss2 = store.SyncStore(tid, ":memory:", 21 * (len('text/plain') + store.RECORD_OVERHEAD))
         # Make some fake socket action
         for i in range(20, 40):
             TestSync.add_data(all_data, ss2, i)
@@ -331,22 +284,23 @@ class TestSync(unittest.TestCase):
             self.assertTrue(ss2.get_data(2, all_data[i]) is not None)
 
     @staticmethod
-    def make_node(asm, store, port):
+    def make_node(asm, tid, store, port):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         local = ('', port)
         sock.bind(local)
         nid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
         stores = {}
-        stores['aaaabbbbcccceeeeffff'] = store
+        stores[tid] = store
         return SyncPeer(asm, nid, stores, sock)
 
     def test_node(self):
+        tid = 'aaaabbbbcccceeeeffff'
         asm = async.AsyncMgr()
-        ss1 = store.SyncStore(":memory:", store.RECORD_OVERHEAD * 41)
-        ss2 = store.SyncStore(":memory:", store.RECORD_OVERHEAD * 41)
-        node1 = TestSync.make_node(asm, ss1, 6000)
-        node2 = TestSync.make_node(asm, ss2, 6001)
+        ss1 = store.SyncStore(tid, ":memory:", 41 * (len('text/plain') + store.RECORD_OVERHEAD))
+        ss2 = store.SyncStore(tid, ":memory:", 41 * (len('text/plain') + store.RECORD_OVERHEAD))
+        node1 = TestSync.make_node(asm, tid, ss1, 6000)
+        node2 = TestSync.make_node(asm, tid, ss2, 6001)
         all_data = []
         for i in range(20):
             TestSync.add_data(all_data, ss1, i)
@@ -358,9 +312,9 @@ class TestSync(unittest.TestCase):
         local = ('', 7001)
         sock.bind(local)
         sock.listen(5)
-        node1.add_peer('aaaabbbbcccceeeeffff', ('127.0.0.1', 8001))
-        node1.add_peer('aaaabbbbcccceeeeffff',('127.0.0.1', 7001))
-        node1.add_peer('aaaabbbbcccceeeeffff',('127.0.0.1', 6001))
+        node1.add_peer(tid, ('127.0.0.1', 8001))
+        node1.add_peer(tid, ('127.0.0.1', 7001))
+        node1.add_peer(tid, ('127.0.0.1', 6001))
         asm.run(20.0)
         for i in range(40):
             self.assertTrue(ss1.get_data(2, all_data[i]) is not None)
