@@ -22,7 +22,7 @@ def worktoken_shared(flat, wtime):
     return float(wtime) + hardness_po2
 
 def make_pubkey_record(pubkey):
-    body = pubkey.exportKey('DER')
+    encoded = pubkey.exportKey('DER')
     hid = hashlib.sha256(encoded).digest()
     return (hid, '0', body) 
 

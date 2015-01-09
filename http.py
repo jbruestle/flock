@@ -8,6 +8,7 @@ import logging
 import socket
 import sys
 import simplejson as json
+import traceback
 from email.utils import formatdate
 
 logger = logging.getLogger('http')
@@ -96,20 +97,21 @@ class HttpConnection(async.Connection):
             return
 
         if req.command == 'PUT':
-            good = self.server.api.put(nid, key, ctype, body)
+            (status, mesg) = self.server.api.put(nid, key, ctype, body)
         else:
-            good = self.server.api.delete(nid, key)
+            (status, mesg) = self.server.api.put(nid, key, ctype, body)
 
-        if good:
-            self.write_no_body(204, "No content")
+        if status == 204:
+            self.write_no_body(status, mesg)
         else:
-            self.send_error(404, "Not Found")
+            self.send_error(status, mesg)
 
     def on_post(self, req, body):
         try:
             obj = json.loads(body)
         except ValueError:
             self.send_error(400, "Invalid JSON")
+            return
         if len(req.path) != 1 and len(req.path) != 41:
             self.send_error(404, "Not Found")
             return
@@ -123,7 +125,13 @@ class HttpConnection(async.Connection):
             except TypeError:
                 self.send_error(404, "Not Found")
                 return
-        jout = self.server.api.post(nid, obj)
+        try:
+            jout = self.server.api.post(nid, obj)
+        except Exception:
+            logger.warning("%s: got error: %s", id(self), sys.exc_info()[1])
+            logger.warning("%s", traceback.format_exc())
+            self.send_error(500, "Internal Server Error")
+            return
         sout = json.dumps(jout)
         resp = HttpResponse(200, "OK")
         resp.add_header('Content-Type', 'application/json')

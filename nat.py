@@ -12,9 +12,7 @@ import select
 
 logger = logging.getLogger('nat')
 
-LOCAL_PORT = 3773
-GOAL_EXT_PORT = 3773
-UPNP_DESC = 'overnet'
+UPNP_DESC = 'flock'
 
 def get_ipv4_default_addr():
     # First, find the default gateway
@@ -34,7 +32,7 @@ def get_ipv4_default_addr():
     # Ok, found the 'primary' gateway facing address
     return ipaddr.IPAddress(addrs[0]['addr'])
 
-def setup_upnp(local):
+def setup_upnp(local, eport):
     logger.info("Trying UPNP")
     upnp = miniupnpc.UPnP()
     if not upnp.discover():
@@ -45,21 +43,22 @@ def setup_upnp(local):
     if upnp.lanaddr != local[0]:
         return None
 
-    try_port = None
-    for port in range(GOAL_EXT_PORT, GOAL_EXT_PORT+100):
+    port = eport
+    for i in range(10):
         mapping = upnp.getspecificportmapping(port, 'TCP')
         logger.info("Checking port %d, mapping = %s", port, mapping)
         if mapping is None:
             # Looks like the port I want is free!
             logger.info("It's free, assigning to me")
-            try_port = port
             break
         (ihost, iport, desc, _, _) = mapping
         if desc != UPNP_DESC:
             # Some other service
+            port += 1
             continue
         if ihost != upnp.lanaddr:
             # Some other device
+            port += 1
             continue
         if iport == local[1]:
             # Looks like it's already set
@@ -68,11 +67,10 @@ def setup_upnp(local):
         # Hmm, clear out old version + break
         logger.info("Wrong local port, deleting mapping")
         upnp.deleteportmapping(port, 'TCP')
-        try_port = port
         break
 
-    upnp.addportmapping(try_port, 'TCP', local[0], local[1], UPNP_DESC, '')
-    return (upnp, try_port)
+    upnp.addportmapping(port, 'TCP', local[0], local[1], UPNP_DESC, '')
+    return (upnp, port)
 
 class BaseConfig(object):
     def __init__(self, sock, ext_ip, ext_port):
@@ -140,7 +138,7 @@ class UPNPConfig(BaseConfig):
             return False
         return True
 
-def autodetect_config():
+def autodetect_config(iport, eport):
     # Check that I have IPv4 to somewhere
     logger.info("Doing network autoconf")
     ipv4 = get_ipv4_default_addr()
@@ -151,7 +149,7 @@ def autodetect_config():
 
     # Make a socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    local = (str(ipv4), LOCAL_PORT)
+    local = (str(ipv4), iport)
     sock.bind(local)
 
     # Check if it's private
@@ -159,7 +157,7 @@ def autodetect_config():
         # Yup, let's try upnp first
         upnp_res = None
         #try:
-        upnp_res = setup_upnp(local)
+        upnp_res = setup_upnp(local, eport)
         #except Exception as e:
         #    pass
         if upnp_res:
@@ -173,7 +171,7 @@ def autodetect_config():
 
 def main():
     logging.basicConfig(level=logging.DEBUG)
-    config = autodetect_config()
+    config = autodetect_config(5151, 5151)
     _ = select.select([config.is_done], [], [], 30)
     config.stop()
 
