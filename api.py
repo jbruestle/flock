@@ -6,7 +6,10 @@ import record
 import hashlib 
 import simplejson as json
 import store
+import logging
 from Crypto.PublicKey import RSA
+
+logger = logging.getLogger('api')
 
 class Api(object):
     def __init__(self, stores, store_dir):
@@ -17,9 +20,11 @@ class Api(object):
         if nid not in self.stores:
             return None
         store = self.stores[nid]
-        khash = hashlib.sha256(data).digest()
+        khash = hashlib.sha256(key).digest()
         (ctype, data) = store.get_data(record.RT_SIGNED, khash)
         if ctype == 'tombstone' and data == 'tombstone':
+            return None
+        if ctype == None:
             return None
         return (ctype, data)
 
@@ -27,11 +32,12 @@ class Api(object):
         if nid not in self.stores:
             return (404, 'Not Found')
         store = self.stores[nid]
-        signer = store.get_signer()
+        signer = store.signer
         if signer == None:
             return (403, 'Forbidden')
         (hid, summary, data) = record.make_signed_record(signer, key, ctype, body)
-        store.on_record(record.RT_SIGNED, hid, summary, data)
+        if not store.on_record(record.RT_SIGNED, hid, summary, data):
+            raise ValueError('unable to write')
         return (204, 'No Content')
 
     def delete(self, nid, key):
@@ -46,7 +52,7 @@ class Api(object):
         return (204, 'No Content')
 
     def post(self, nid, obj):
-        print 'Got a post: ', obj
+        logger.info('Got a post: %s', obj)
         if type(obj) is not dict:
             return { 'success' : False, 'error' : 'API request a json object' }
         if 'action' not in obj:
@@ -73,6 +79,7 @@ class Api(object):
         tid = hid[0:20]
         store_path = os.path.join(self.store_dir, tid.encode('hex'))
         the_store = store.SyncStore(tid, store_path, max_size)
-        the_store.set_signer(priv_key)
+        the_store.set_priv_key(priv_key)
         self.stores[tid] = the_store 
+        return { 'success' : True, 'tid' : tid.encode('hex') }
                 

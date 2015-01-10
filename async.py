@@ -10,6 +10,7 @@ import collections
 import struct
 import logging
 import sys
+import traceback
 
 logger = logging.getLogger('async')
 
@@ -59,6 +60,7 @@ class Connection(asynchat.async_chat):
 
     def handle_error(self):
         logger.warning("%s: got error: %s", id(self), sys.exc_info()[1])
+        logger.warning("%s", traceback.format_exc())
         self.close()
 
     def handle_close(self):

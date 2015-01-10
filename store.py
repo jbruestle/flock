@@ -19,15 +19,18 @@ logger = logging.getLogger('store')
 
 class SyncStore(object):
     internal_sql = '''
-    CREATE TABLE records (
+    CREATE TABLE IF NOT EXISTS priv_key (
+        data    BLOB
+    );
+    CREATE TABLE IF NOT EXISTS records (
         seq     INTEGER PRIMARY KEY AUTOINCREMENT,
         rtype   INTEGER,
-        hid     TEXT,
-        summary TEXT,
-        data    TEXT,
+        hid     BLOB,
+        summary BLOB,
+        data    BLOB,
         score   REAL
     );
-    CREATE TABLE ips (
+    CREATE TABLE IF NOT EXISTS ips (
         ip     TEXT,
         port   INTEGER,
         atime  INTEGER,
@@ -37,13 +40,13 @@ class SyncStore(object):
         busy   INTEGER,
         PRIMARY KEY (ip, port)
     );
-    CREATE TABLE peers (
+    CREATE TABLE IF NOT EXISTS peers (
         nid    TEXT PRIMARY KEY,
         busy   INTEGER,
         seq    INTEGER
     );
-    CREATE UNIQUE INDEX records_hid ON records (rtype, hid);
-    CREATE INDEX records_score ON records (score);
+    CREATE UNIQUE INDEX IF NOT EXISTS records_hid ON records (rtype, hid);
+    CREATE INDEX IF NOT EXISTS records_score ON records (score);
     '''
 
     def __init__(self, tid, dbfile, max_size):
@@ -59,7 +62,13 @@ class SyncStore(object):
         self.cur.execute("SELECT data FROM records WHERE rtype = ? LIMIT 1", (record.RT_PUBKEY,))
         row = self.cur.fetchone()
         if row is not None:
-            __set_pubkey(row[0])
+            self.__set_pubkey(row[0])
+        self.signer = None
+        self.cur.execute("SELECT data FROM priv_key LIMIT 1")
+        row = self.cur.fetchone()
+        if row is not None:
+            priv_key = RSA.importKey(row[0], 'DER')
+            self.signer = PKCS1_PSS.new(priv_key)
         self.cur.execute("UPDATE ips SET busy = 0")
         self.cur.execute("UPDATE peers SET busy = 0")
         self.connections = 0
@@ -73,9 +82,17 @@ class SyncStore(object):
             self.cur_size -= size
             self.cur.execute("DELETE FROM records WHERE seq = ?", (seq,))
 
-    def __set_pubkey(data):
-        pubkey = RSA.importKey(data, 'DER')
-        self.verify = signer = PKCS1_PSS.new(key)
+    def __set_pubkey(self, data):
+        pub_key = RSA.importKey(data, 'DER')
+        self.verify = signer = PKCS1_PSS.new(pub_key)
+
+    def set_priv_key(self, priv_key):
+        self.signer = PKCS1_PSS.new(priv_key)
+        pub_key = priv_key.publickey()
+        self.cur.execute("INSERT INTO priv_key (data) VALUES (?)", 
+            (buffer(priv_key.exportKey('PEM')),))
+        (hid, summary, body) = record.make_pubkey_record(pub_key)
+        self.on_record(record.RT_PUBKEY, hid, summary, body)
 
     def on_add_peer(self, addr):
         self.cur.execute(
@@ -203,7 +220,7 @@ class SyncStore(object):
         self.__shrink()
         # Maybe found a pubkey?
         if rtype == record.RT_PUBKEY:
-            __set_pubkey(data)
+            self.__set_pubkey(data)
         return True
 
     def get_summary(self, seq):

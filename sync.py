@@ -103,7 +103,7 @@ class SyncConnection(async.Connection):
         need_data = self.store.on_summary(rtype, hid, summary)
         if need_data:
             logger.debug("requesting data")
-            self.await_data.append((rtype, hid, summary))
+            self.await_data.append((seq, rtype, hid, summary))
             self.send_buffer('N')
         else:
             self.send_buffer('O')
@@ -112,7 +112,7 @@ class SyncConnection(async.Connection):
         self.recv_buffer(1, self.on_type)
 
     def on_data_header(self, dsize):
-        (rtype, hid, summary) = self.await_data.popleft()
+        (_, rtype, hid, summary) = self.await_data.popleft()
         callback = lambda data: self.on_data(rtype, hid, summary, data)
         self.recv_buffer(dsize, callback)
 
@@ -232,6 +232,8 @@ class SyncPeer(asyncore.dispatcher):
 
     def on_timer(self):
         self.asm.add_timer(time.time() + 1, self.on_timer)
+        for tid, store in self.stores.iteritems():
+            store.con.commit()
         for tid, store in self.stores.iteritems():
             if store.connections >= GOAL_PEERS:
                 return

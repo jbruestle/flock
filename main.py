@@ -16,11 +16,11 @@ import store
 import http
 import api
 
-def safe_found_peer(speer, self_addr, peer_addr):
+def safe_found_peer(speer, self_addr, tid, peer_addr):
     if self_addr == peer_addr:
         logging.info("Whoops, it's myself")
         return
-    speer.add_peer(peer_addr)
+    speer.add_peer(tid, peer_addr)
 
 def main():
     # Parse some params
@@ -51,8 +51,17 @@ def main():
         raise(ValueError('Invalid nid'))
         
     # Load stores 
-    # TODO: Actually make this do something
     stores = {}
+    for bname in os.listdir(store_dir):
+        if len(bname) != 40:
+            continue
+        try:
+            tid = bname.decode('hex')
+        except Exception:
+            continue
+        #TODO: Max size?
+        nstore = store.SyncStore(tid, os.path.join(store_dir, bname), 1*1024*1024)
+        stores[tid] = nstore
 
     # Nat punch out
     config = nat.autodetect_config(args.port, args.eport)
@@ -79,9 +88,9 @@ def main():
         the_dht.bootstrap_node(addr)
 
     # Make a DHT location for each store
-    for tid, store in stores.iteritems():
+    for tid, _ in stores.iteritems():
         loc = the_dht.add_location(tid, config.ext_port)
-        loc.on_found_peer = lambda addr: safe_found_peer(sync_peer, ext_addr, addr)
+        loc.on_found_peer = lambda addr: safe_found_peer(sync_peer, ext_addr, tid, addr)
 
     # Setup the http api
     the_api = api.Api(stores, store_dir)

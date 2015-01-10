@@ -4,6 +4,8 @@ import struct
 import time
 import math
 import random
+import logging
+from Crypto.Hash import SHA256
 from Crypto.PublicKey import RSA
 from Crypto.Signature import PKCS1_PSS
 
@@ -11,6 +13,8 @@ RT_PUBKEY = 0
 RT_WORKTOKEN = 1
 RT_SIGNED = 2
 WT_HALFLIFE = 259200.0  # 3 days, measured in seconds
+
+logger = logging.getLogger('record')
 
 def worktoken_shared(flat, wtime):
     digest1 = hashlib.sha256(flat).digest()
@@ -24,7 +28,7 @@ def worktoken_shared(flat, wtime):
 def make_pubkey_record(pubkey):
     encoded = pubkey.exportKey('DER')
     hid = hashlib.sha256(encoded).digest()
-    return (hid, '0', body) 
+    return (hid, '0', encoded) 
 
 def make_worktoken_record(ctype, data):
     assert len(ctype) < 256
@@ -37,14 +41,15 @@ def make_signed_record(signer, key, ctype, data):
     assert len(ctype) < 256
     hid = hashlib.sha256(key).digest()
     summary = struct.pack("!L", int(time.time()))
-    sig_hash = hashlib.sha256()
+    # Need to use pycrypto's hashes for signatures
+    sig_hash = SHA256.new()
     sig_hash.update(hid)
     sig_hash.update(summary)
     sig_hash.update(chr(len(ctype)))
     sig_hash.update(ctype)
     sig_hash.update(data)
     signature = signer.sign(sig_hash)
-    body = signature + chr(len(ctype)) + ctype + '\n' + data 
+    body = signature + chr(len(ctype)) + ctype + data 
     return (hid, summary, body)
 
 def mine_worktoken(hid, count):
@@ -70,7 +75,7 @@ def score_record(rtype, hid, summary):
             return -1
         (wtime, _) = struct.unpack("!LL", summary)
         return worktoken_shared(hid + summary, wtime)
-    elif rtype == WT_SIGNED:
+    elif rtype == RT_SIGNED:
         if len(summary) != 4:
             return -1
         (wtime,) = struct.unpack("!L", summary)
@@ -80,56 +85,70 @@ def score_record(rtype, hid, summary):
 
 def validate_pubkey(tid, hid, summary, body):
     if tid != hid[0:20]:
+        logger.warning('pubkey doesnt match tid')
         return False
     if summary != '0':
+        logger.warning('Summary is not 0')
         return False
-    if hashlib.sha256(key).digest() != hid:
+    if hashlib.sha256(body).digest() != hid:
+        logger.warning('pubkey failed digest check')
         return False
     try:
         pubkey = RSA.importKey(body)
     except Exception:
+        logger.warning('pubkey not RSA key')
         return False
     if pubkey.has_private():
+        logger.warning('pubkey is a private key')
         return False
     if pubkey.size() != 2047:
+        logger.warning('pubkey is not 2048 bits')
         return False
     return True
 
 def validate_worktoken(hid, summary, body):
     if len(body) < 3:
+        logger.warning('Worktoken body too small')
         return False
     ctypelen = ord(body[0])
     if ctypelen < 1:
+        logger.warning('Worktoken ctype too small')
         return False
     if len(body) < (1 + ctypelen + 1):
+        logger.warning('Worktoken body too small (2)')
         return False
     return hid == hashlib.sha256(body).digest()
     
-    
 def validate_signed(verify, hid, summary, body):
     if verify is None:
+        logger.warning('Signed no key to verify')
         return False
     if len(body) < 259:
+        logger.warning('Signed body too small')
         return False
     ctypelen = ord(body[256])
     if ctypelen < 1:
+        logger.warning('Signed ctype too small')
         return False
     if len(body) < (256 + 1 + ctypelen + 1):
+        logger.warning('Signed body too small (2)')
         return False
     summary = struct.pack("!L", int(time.time()))
-    sig_hash = hashlib.sha256()
+    sig_hash = SHA256.new()
     sig_hash.update(hid)
     sig_hash.update(summary)
     sig_hash.update(body[256:])
-    return verify.verify(sig_hash, body[0:256])
-
+    if not verify.verify(sig_hash, body[0:256]):
+        logger.warning('Signed record, signature failure')
+        return False
+    return True
 
 def validate_record(rtype, tid, verify, hid, summary, body):
     if rtype == RT_PUBKEY:
         return validate_pubkey(tid, hid, summary, body)
     elif rtype == RT_WORKTOKEN:
         return hid == hashlib.sha256(body).digest()
-    elif rtype == WT_SIGNED:
+    elif rtype == RT_SIGNED:
         return validate_signed(verify, hid, summary, body)
     else:
         return False
@@ -140,7 +159,7 @@ def get_record_content(rtype, body):
     elif rtype == RT_WORKTOKEN:
         ctypelen = ord(body[0])
         return (body[1:1+ctypelen], body[1+ctypelen:])
-    elif rtype == WT_SIGNED:
+    elif rtype == RT_SIGNED:
         ctypelen = ord(body[256])
         return (body[257:257+ctypelen], body[257+ctypelen:])
     else:

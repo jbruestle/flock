@@ -153,7 +153,8 @@ def autodetect_config(iport, eport):
     sock.bind(local)
 
     # Check if it's private
-    if ipv4.is_private:
+    #if ipv4.is_private:
+    if False:
         # Yup, let's try upnp first
         upnp_res = None
         #try:
@@ -167,7 +168,7 @@ def autodetect_config(iport, eport):
     else:
         # Return simple external V4
         logger.info("Looks like an external IP")
-        return ExtV4Config(sock, ipv4, LOCAL_PORT)
+        return ExtV4Config(sock, ipv4, iport)
 
 def main():
     logging.basicConfig(level=logging.DEBUG)

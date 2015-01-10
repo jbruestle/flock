@@ -9,6 +9,7 @@ import socket
 import sys
 import simplejson as json
 import traceback
+import logging
 from email.utils import formatdate
 
 logger = logging.getLogger('http')
@@ -90,6 +91,7 @@ class HttpConnection(async.Connection):
             if getr == None:
                 self.send_error(404, "Not Found")
                 return
+            print "Got %s" % (getr,)
             (rtype, rbody) = getr
             resp = HttpResponse(200, "OK")
             resp.add_header('Content-Type', rtype)
