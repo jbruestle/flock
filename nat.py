@@ -143,7 +143,9 @@ class UPNPConfig(BaseConfig):
             return False
         return True
 
-def autodetect_config(iport, eport):
+def autodetect_config(cfg={}): # pylint: disable=dangerous-default-value
+    iport = cfg.get('int_port', 58892)
+    eport = cfg.get('ext_iport', 58892)
     # Check that I have IPv4 to somewhere
     logger.info("Doing network autoconf")
     ipv4 = get_ipv4_default_addr()
@@ -158,8 +160,7 @@ def autodetect_config(iport, eport):
     sock.bind(local)
 
     # Check if it's private
-    #if ipv4.is_private:
-    if False:
+    if ipv4.is_private:
         # Yup, let's try upnp first
         upnp_res = None
         #try:
@@ -177,7 +178,7 @@ def autodetect_config(iport, eport):
 
 def main():
     logging.basicConfig(level=logging.DEBUG)
-    config = autodetect_config(5151, 5151)
+    config = autodetect_config()
     _ = select.select([config.is_done], [], [], 30)
     config.stop()
 

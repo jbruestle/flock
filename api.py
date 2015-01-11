@@ -1,24 +1,20 @@
 #!/usr/bin/env python
 # pylint: disable=missing-docstring
 
-import os
 import record
 import hashlib
-import store
 import logging
-from Crypto.PublicKey import RSA
 
 logger = logging.getLogger('api') # pylint: disable=invalid-name
 
 class Api(object):
-    def __init__(self, stores, store_dir):
-        self.stores = stores
-        self.store_dir = store_dir
+    def __init__(self, node):
+        self.node = node
 
     def get(self, nid, key):
-        if nid not in self.stores:
+        if nid not in self.node.stores:
             return None
-        the_store = self.stores[nid]
+        the_store = self.node.stores[nid]
         khash = hashlib.sha256(key).digest()
         (ctype, data) = the_store.get_data(record.RT_SIGNED, khash)
         if ctype == 'tombstone' and data == 'tombstone':
@@ -28,9 +24,9 @@ class Api(object):
         return (ctype, data)
 
     def put(self, nid, key, ctype, body):
-        if nid not in self.stores:
+        if nid not in self.node.stores:
             return (404, 'Not Found')
-        the_store = self.stores[nid]
+        the_store = self.node.stores[nid]
         signer = the_store.signer
         if signer == None:
             return (403, 'Forbidden')
@@ -65,14 +61,6 @@ class Api(object):
             return {'success' : False, 'error' : 'max_size must be an int'}
         if max_size < 0 or max_size > 1*1024*1024*1024:
             return {'success' : False, 'error' : 'max_size out of range'}
-        priv_key = RSA.generate(2048)
-        pub_key = priv_key.publickey()
-        encoded = pub_key.exportKey('DER')
-        hid = hashlib.sha256(encoded).digest()
-        tid = hid[0:20]
-        store_path = os.path.join(self.store_dir, tid.encode('hex'))
-        the_store = store.SyncStore(tid, store_path, max_size)
-        the_store.set_priv_key(priv_key)
-        self.stores[tid] = the_store
+        tid = self.node.create_add(max_size)
         return {'success' : True, 'tid' : tid.encode('hex')}
 

@@ -171,12 +171,12 @@ class HttpConnection(async.Connection):
         self.write_response(resp, body)
 
 class HttpServer(asyncore.dispatcher):
-    def __init__(self, asm, api, port):
+    def __init__(self, asm, api, cfg={}): # pylint: disable=dangerous-default-value
         self.asm = asm
         self.api = api
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(('127.0.0.1', port))
+        sock.bind(('127.0.0.1', cfg.get('port', 8000)))
         asyncore.dispatcher.__init__(self, sock=sock, map=self.asm.async_map)
         self.listen(5)
 
@@ -215,7 +215,7 @@ def main():
     logging.basicConfig(level=logging.INFO)
     asm = async.AsyncMgr()
     api = TestApi()
-    _ = HttpServer(asm, api, 8000)
+    _ = HttpServer(asm, api)
     asm.run()
 
 if __name__ == '__main__':

@@ -253,14 +253,14 @@ class DhtBucket(object):
 
 
 class DhtLocation(object):
-    def __init__(self, dht, tid, port):
+    def __init__(self, dht, tid, port, callback):
         self.dht = dht
         self.tid = tid
         self.port = port
         self.buckets = [DhtBucket(dht, self) for _ in range(160)]
         self.timer = None
         self.peers = collections.OrderedDict()
-        self.on_found_peer = None
+        self.on_found_peer = callback
 
     def __shared_bits(self, nid1, nid2):
         _ = self
@@ -327,19 +327,19 @@ class DhtLocation(object):
             self.peers.popitem(False)
 
 class Dht(object):
-    def __init__(self, asm, mid, port=6881):
+    def __init__(self, asm, mid, cfg={}): # pylint: disable=dangerous-default-value
         self.asm = asm
-        self.rpc = DhtRpc(self, self.asm, port)
+        self.rpc = DhtRpc(self, self.asm, cfg.get('port', 6881))
         self.mid = mid
         self.locations = {}
-        self.add_location(mid, None)
+        self.add_location(mid, None, None)
         self.rpc.add_handler('ping', self.__ping_request)
         self.rpc.add_handler('find_node', self.__find_node_request)
         self.rpc.add_handler('get_peers', self.__get_peers_request)
         self.rpc.add_handler('announce', self.__announce_request)
 
-    def add_location(self, tid, port):
-        loc = DhtLocation(self, tid, port)
+    def add_location(self, tid, port, callback):
+        loc = DhtLocation(self, tid, port, callback)
         self.locations[tid] = loc
         return loc
 
@@ -407,7 +407,7 @@ def main():
     mid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
     asm = async.AsyncMgr()
     dht = Dht(asm, mid)
-    dht.add_location('aaaabbbbeeeeffff000011112222333366667788'.decode('hex'), 6881)
+    dht.add_location('aaaabbbbeeeeffff000011112222333366667788'.decode('hex'), 6881, None)
     #dht.add_location('ef43d791e5be5f6a8a39c285cdbbd92a0c23870b'.decode('hex'), 8000)
     for addr in bootstrap:
         dht.bootstrap_node(addr)
