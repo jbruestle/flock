@@ -1,9 +1,9 @@
 #!/usr/bin/python
-#pylint: disable=missing-docstring
-#pylint: disable=bad-continuation
+# pylint: disable=missing-docstring
+# pylint: disable=bad-continuation
+# pylint: disable=too-many-instance-attributes
 
 import sqlite3
-import hashlib
 import time
 import unittest
 import logging
@@ -15,7 +15,7 @@ import record
 
 RECORD_OVERHEAD = 100
 
-logger = logging.getLogger('store')
+logger = logging.getLogger('store') # pylint: disable=invalid-name
 
 class SyncStore(object):
     internal_sql = '''
@@ -84,12 +84,12 @@ class SyncStore(object):
 
     def __set_pubkey(self, data):
         pub_key = RSA.importKey(data, 'DER')
-        self.verify = signer = PKCS1_PSS.new(pub_key)
+        self.verify = PKCS1_PSS.new(pub_key)
 
     def set_priv_key(self, priv_key):
         self.signer = PKCS1_PSS.new(priv_key)
         pub_key = priv_key.publickey()
-        self.cur.execute("INSERT INTO priv_key (data) VALUES (?)", 
+        self.cur.execute("INSERT INTO priv_key (data) VALUES (?)",
             (buffer(priv_key.exportKey('PEM')),))
         (hid, summary, body) = record.make_pubkey_record(pub_key)
         self.on_record(record.RT_PUBKEY, hid, summary, body)
@@ -161,7 +161,7 @@ class SyncStore(object):
         if nid is not None:
             self.cur.execute("UPDATE peers SET busy = 0 WHERE nid = ?", (buffer(nid),))
         if addr is not None:
-            self.cur.execute("UPDATE ips SET busy = 0, wtime = dtime + ? WHERE ip = ? AND port = ?", 
+            self.cur.execute("UPDATE ips SET busy = 0, wtime = dtime + ? WHERE ip = ? AND port = ?",
                 (time.time(), addr[0], addr[1]))
 
     def on_seq_update(self, nid, seq):
@@ -180,7 +180,7 @@ class SyncStore(object):
         score = record.score_record(rtype, hid, summary)
         # If it's negative, drop
         if score < 0:
-            return False;
+            return False
         (cscore, data) = row
         # If new records isn't better, forget it
         if cscore >= score:
@@ -194,7 +194,7 @@ class SyncStore(object):
             (rtype, buffer(hid), buffer(summary), buffer(data), score))
             return False
         # Otherwise I need the whole data
-        return True 
+        return True
 
     def on_record(self, rtype, hid, summary, data):
         # Validate + Score
@@ -235,7 +235,7 @@ class SyncStore(object):
         return (rseq, rtype, str(hid), str(summary))
 
     def get_data(self, rtype, hid):
-        self.cur.execute("SELECT data FROM records WHERE rtype = ? AND hid = ?", 
+        self.cur.execute("SELECT data FROM records WHERE rtype = ? AND hid = ?",
             (rtype, buffer(hid)))
         row = self.cur.fetchone()
         if row is None:
@@ -243,7 +243,7 @@ class SyncStore(object):
         return record.get_record_content(rtype, str(row[0]))
 
     def get_raw_data(self, rtype, hid):
-        self.cur.execute("SELECT data FROM records WHERE rtype = ? AND hid = ?", 
+        self.cur.execute("SELECT data FROM records WHERE rtype = ? AND hid = ?",
             (rtype, buffer(hid)))
         row = self.cur.fetchone()
         if row is None:
@@ -256,74 +256,73 @@ class TestSyncStore(unittest.TestCase):
         # Make a SyncStore that holds 20 objects
         tid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
         store = SyncStore(tid, ":memory:", 21 * (len('text/plain') + RECORD_OVERHEAD))
-        all_data = []
+        recs = []
         # Make 30 random entries and insert them
         for i in range(30):
             (hid, summary, data) = record.make_worktoken_record('text/plain', str(i))
             score = record.score_record(record.RT_WORKTOKEN, hid, summary)
-            all_data.append((score, hid, str(i)))
+            recs.append((score, hid, str(i)))
             store.on_record(record.RT_WORKTOKEN, hid, summary, data)
         # Sort entries by score
-        all_data.sort(key=lambda x: x[0])
+        recs.sort(key=lambda x: x[0])
         # Check the the right elements are there
         for i in range(10):
-            self.assertTrue(store.get_data(record.RT_WORKTOKEN, all_data[i][1]) == (None, None))
+            self.assertTrue(store.get_data(record.RT_WORKTOKEN, recs[i][1])[1] == None)
         for i in range(10, 30):
-            self.assertTrue(store.get_data(record.RT_WORKTOKEN, all_data[i][1]) == ('text/plain', all_data[i][2]))
+            self.assertTrue(store.get_data(record.RT_WORKTOKEN, recs[i][1])[1] == recs[i][2])
 
     def test_update(self):
         # Make a SyncStore that holds 20 objects
         tid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
         store = SyncStore(tid, ":memory:", 21 * (len('text/plain') + RECORD_OVERHEAD))
-        all_data = []
+        recs = []
         # Make 20 random entries and insert them
         for i in range(20):
             (hid, summary, data) = record.make_worktoken_record('text/plain', str(i))
-            all_data.append((hid, str(i)))
+            recs.append((hid, str(i)))
             store.on_record(record.RT_WORKTOKEN, hid, summary, data)
         # 'Increase score' for the first 10 and update WT
         for i in range(10):
-            (score, summary) = record.mine_worktoken(all_data[i][0], 1000)
-            store.on_summary(record.RT_WORKTOKEN, all_data[i][0], summary)
+            (_, summary) = record.mine_worktoken(recs[i][0], 1000)
+            store.on_summary(record.RT_WORKTOKEN, recs[i][0], summary)
         # Now add 10 more 'premined' values
         for i in range(10):
             (hid, summary, data) = record.make_worktoken_record('text/plain', str(20+i))
-            (score, summary) = record.mine_worktoken(hid, 1000)
+            (_, summary) = record.mine_worktoken(hid, 1000)
             store.on_record(record.RT_WORKTOKEN, hid, summary, data)
-            all_data.append((hid, str(20+i)))
+            recs.append((hid, str(20+i)))
         # Check that right elements survived
         for i in range(10):
-            self.assertTrue(store.get_data(record.RT_WORKTOKEN, all_data[i][0])[1] == all_data[i][1])
+            self.assertTrue(store.get_data(record.RT_WORKTOKEN, recs[i][0])[1] == recs[i][1])
         for i in range(10, 20):
-            self.assertTrue(store.get_data(record.RT_WORKTOKEN, all_data[i][0])[1] is None)
+            self.assertTrue(store.get_data(record.RT_WORKTOKEN, recs[i][0])[1] is None)
         for i in range(20, 30):
-            self.assertTrue(store.get_data(record.RT_WORKTOKEN, all_data[i][0])[1] == all_data[i][1])
+            self.assertTrue(store.get_data(record.RT_WORKTOKEN, recs[i][0])[1] == recs[i][1])
 
     def test_get_summary(self):
-        return
         # Make a SyncStore that holds 20 objects
         tid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
         store = SyncStore(tid, ":memory:", 21 * (len('text/plain') + RECORD_OVERHEAD))
-        all_data = []
+        recs = []
         # Make 20 random entries and insert them
         for i in range(20):
             (hid, summary, data) = record.make_worktoken_record('text/plain', str(i))
-            all_data.append((hid, str(i)))
+            recs.append((hid, str(i)))
             store.on_record(record.RT_WORKTOKEN, hid, summary, data)
         # 'Mine' for the first 10 and update WT
         for i in range(10):
-            (score, summary) = record.mine_worktoken(all_data[i][0], 1000)
-            store.on_summary(record.RT_WORKTOKEN, all_data[i][0], summary)
+            (_, summary) = record.mine_worktoken(recs[i][0], 1000)
+            store.on_summary(record.RT_WORKTOKEN, recs[i][0], summary)
         # Check for order of 'events'
         seq = 0
         for i in range(10):
-            (seq, rtype, hid, summary) = store.get_summary(seq)
+            (seq, rtype, hid, _) = store.get_summary(seq)
             self.assertTrue(rtype == record.RT_WORKTOKEN)
-            self.assertTrue(hid == all_data[i + 10][0])
+            self.assertTrue(hid == recs[i + 10][0])
         for i in range(10, 20):
-            (seq, rtype, rsum) = store.get_summary(seq)
+            (seq, rtype, hid, _) = store.get_summary(seq)
             self.assertTrue(rtype == record.RT_WORKTOKEN)
-            self.assertTrue(hid == all_data[i - 10][0])
+            self.assertTrue(hid == recs[i - 10][0])
         self.assertTrue(store.get_summary(seq)[0] is None)
 
 if __name__ == '__main__':

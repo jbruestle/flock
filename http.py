@@ -1,4 +1,8 @@
-#!/usr/bin/python
+#!/usr/bin/env python
+# pylint: disable=missing-docstring
+# pylint: disable=too-few-public-methods
+# pylint: disable=too-many-return-statements
+# pylint: disable=too-many-branches
 
 import async
 import asyncore
@@ -9,19 +13,22 @@ import socket
 import sys
 import simplejson as json
 import traceback
-import logging
 from email.utils import formatdate
 
-logger = logging.getLogger('http')
+logger = logging.getLogger('http') # pylint: disable=invalid-name
 
+# TODO: The 'reuse' of HttpRequest to parse the request is a bit
+# questionable, since it relies on implementation details, but good
+# enough for the time being
 class HttpRequest(BaseHTTPServer.BaseHTTPRequestHandler):
     def __init__(self, request_text):
+        # pylint: disable=super-init-not-called
         self.rfile = StringIO.StringIO(request_text)
         self.raw_requestline = self.rfile.readline()
         self.error_code = self.error_message = None
         self.parse_request()
 
-    def send_error(self, code, message):
+    def send_error(self, code, message=None):
         self.error_code = code
         self.error_message = message
 
@@ -129,7 +136,7 @@ class HttpConnection(async.Connection):
                 return
         try:
             jout = self.server.api.post(nid, obj)
-        except Exception:
+        except Exception: # pylint: disable=broad-except
             logger.warning("%s: got error: %s", id(self), sys.exc_info()[1])
             logger.warning("%s", traceback.format_exc())
             self.send_error(500, "Internal Server Error")
@@ -160,7 +167,7 @@ class HttpConnection(async.Connection):
     def send_error(self, status, message):
         resp = HttpResponse(status, message)
         resp.add_header('Content-Type', 'application/json')
-        body = json.dumps({ "success" : False, "error" : message})
+        body = json.dumps({"success" : False, "error" : message})
         self.write_response(resp, body)
 
 class HttpServer(asyncore.dispatcher):
@@ -181,32 +188,34 @@ class HttpServer(asyncore.dispatcher):
         pair = self.accept()
         if pair is None:
             return
-        (sock, addr) = pair
+        (sock, addr) = pair # pylint: disable=unpacking-non-sequence
         logger.info("Incoming connection from %s", addr)
         _ = HttpConnection(sock, self)
- 
 
 class TestApi(object):
     def get(self, nid, key):
+        _ = (self, nid)
         if key == 'hello':
             return ('text/plain', 'world')
         return None
 
     def put(self, nid, key, ctype, body):
+        _ = (self, nid, key, ctype, body)
         return True
 
     def delete(self, nid, key):
+        _ = (self, nid, key)
         return True
-        pass
 
     def post(self, nid, obj):
+        _ = (self, nid, obj)
         return {}
 
 def main():
     logging.basicConfig(level=logging.INFO)
     asm = async.AsyncMgr()
     api = TestApi()
-    server = HttpServer(asm, api, 8000)
+    _ = HttpServer(asm, api, 8000)
     asm.run()
 
 if __name__ == '__main__':

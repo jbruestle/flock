@@ -1,6 +1,6 @@
-#!/usr/bin/python
-#pylint: disable=missing-docstring
-#pylint: disable=bad-continuation
+#!/usr/bin/env python
+# pylint: disable=missing-docstring
+# pylint: disable=bad-continuation
 
 import asyncore
 import bencode
@@ -14,7 +14,7 @@ import logging
 
 import async
 
-logger = logging.getLogger('dht')
+logger = logging.getLogger('dht') # pylint: disable=invalid-name
 
 REQUEST_TIMEOUT = 3
 GOOD_NODES = 8
@@ -35,7 +35,7 @@ class DhtRpc(asyncore.dispatcher):
         self.pending = {}
         self.handlers = {}
 
-    #pylint: disable=too-many-arguments
+    # pylint: disable=too-many-arguments
     def send_request(self, addr, rtype, args, on_succ, on_fail):
         while self.tid in self.pending:
             self.tid = (self.tid + 1) & 0xffff
@@ -117,7 +117,7 @@ class DhtRpc(asyncore.dispatcher):
         del self.pending[tid]
         on_fail([205, "Timeout"])
 
-#pylint: disable=too-few-public-methods
+# pylint: disable=too-few-public-methods
 class DhtNode(object):
     def __init__(self, addr, nid):
         self.addr = addr
@@ -318,7 +318,7 @@ class DhtLocation(object):
     def found_peer(self, addr):
         if addr in self.peers:
             return
-        #pylint: disable=not-callable
+        # pylint: disable=not-callable
         if self.on_found_peer is not None:
             self.on_found_peer(addr)
         logger.info("Found new peer: %s", addr)

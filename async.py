@@ -1,18 +1,16 @@
-#!/usr/bin/python
-#pylint: disable=missing-docstring
+#!/usr/bin/env python
+# pylint: disable=missing-docstring
 
 import time
 import asyncore
 import asynchat
 import bintrees
-import multiprocessing
-import collections
 import struct
 import logging
 import sys
-import traceback
+#import traceback
 
-logger = logging.getLogger('async')
+logger = logging.getLogger('async') # pylint: disable=invalid-name
 
 class AsyncMgr(object):
     def __init__(self):
@@ -52,7 +50,7 @@ class AsyncMgr(object):
         self.running = False
 
 class Connection(asynchat.async_chat):
-    def __init__(self, sock, map=None):
+    def __init__(self, sock, map=None): # pylint: disable=redefined-builtin
         asynchat.async_chat.__init__(self, sock=sock, map=map)
         self.__term_callback = None
         self.__ibuffer = []
@@ -60,7 +58,7 @@ class Connection(asynchat.async_chat):
 
     def handle_error(self):
         logger.warning("%s: got error: %s", id(self), sys.exc_info()[1])
-        logger.warning("%s", traceback.format_exc())
+        #logger.warning("%s", traceback.format_exc())
         self.close()
 
     def handle_close(self):
@@ -71,7 +69,7 @@ class Connection(asynchat.async_chat):
         self.__ibuffer.append(data)
 
     def found_terminator(self):
-        #pylint: disable=star-args
+        # pylint: disable=star-args
         if self.__fmt is None:
             self.__term_callback("".join(self.__ibuffer))
         else:

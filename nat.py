@@ -1,5 +1,7 @@
-#!/usr/bin/python
-#pylint: disable=missing-docstring
+#!/usr/bin/env python
+# pylint: disable=missing-docstring
+# pylint: disable=too-many-instance-attributes
+# pylint: disable=too-few-public-methods
 
 import time
 import netifaces
@@ -10,11 +12,14 @@ import threading
 import logging
 import select
 
-logger = logging.getLogger('nat')
+logger = logging.getLogger('nat') # pylint: disable=invalid-name
 
 UPNP_DESC = 'flock'
 
 def get_ipv4_default_addr():
+    # For some reason, netifaces doesn't seem to play nice
+    # with pylint, so we disable no-member
+    # pylint: disable=no-member
     # First, find the default gateway
     gws = netifaces.gateways()
     defaults = gws['default']
@@ -34,7 +39,7 @@ def get_ipv4_default_addr():
 
 def setup_upnp(local, eport):
     logger.info("Trying UPNP")
-    upnp = miniupnpc.UPnP()
+    upnp = miniupnpc.UPnP() # pylint: disable=no-member
     if not upnp.discover():
         logger.info("Failed to discover")
         return None
@@ -44,7 +49,7 @@ def setup_upnp(local, eport):
         return None
 
     port = eport
-    for i in range(10):
+    for _ in range(10):
         mapping = upnp.getspecificportmapping(port, 'TCP')
         logger.info("Checking port %d, mapping = %s", port, mapping)
         if mapping is None:
@@ -94,10 +99,14 @@ class BaseConfig(object):
         self.__thread.join()
 
     def __check_thread(self):
-        while not self.__stop_thread:
-            time.sleep(self._check_time)
-            if not self._check():
-                break
+        try:
+            while not self.__stop_thread:
+                time.sleep(self._check_time)
+                if not self._check():
+                    break
+        except: # pylint: disable = bare-except
+            # Any failure in check thread shuts network down
+            pass
         self.__make_done.close()
 
     def _check(self):
@@ -126,11 +135,7 @@ class UPNPConfig(BaseConfig):
         ipv4 = get_ipv4_default_addr()
         if str(ipv4) != self.local_addr:
             return False
-        mapping = None
-        try:
-            mapping = self.upnp.getspecificportmapping(self.ext_port, 'TCP')
-        except Exception as e:
-            pass
+        mapping = self.upnp.getspecificportmapping(self.ext_port, 'TCP')
         if mapping is None:
             return False
         (ihost, iport, desc, _, _) = mapping

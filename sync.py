@@ -1,29 +1,26 @@
 #!/usr/bin/python
-#pylint: disable=missing-docstring
+# pylint: disable=missing-docstring
+# pylint: disable=too-many-instance-attributes
+# pylint: disable=too-few-public-methods
 
 import collections
 import time
 import asyncore
-import asynchat
-import struct
-import hashlib
 import socket
 import unittest
 import logging
 import random
-import sys
-from Crypto.PublicKey import RSA
 
 import store
 import async
 import record
 
-logger = logging.getLogger('sync')
+logger = logging.getLogger('sync') # pylint: disable=invalid-name
 
 GOAL_PEERS = 8
 MAX_PEERS = 20
 CONNECT_TIMEOUT = 5
-NEGOTIATE_TIMEOUT = 2 
+NEGOTIATE_TIMEOUT = 2
 
 HELLO_FMT = '!4s20s'  # Magic #, ID
 HELLO_ACK_FMT = '!QL'  # Seq No, Buffer size
@@ -32,12 +29,12 @@ DATA_HDR_FMT = '!H' # Data size
 ADVANCE_FMT = '!?'
 
 class SyncConnection(async.Connection):
-    def __init__(self, nid, store, sock, map=None):
+    def __init__(self, nid, sstore, sock, map=None): #pylint: disable=redefined-builtin
         async.Connection.__init__(self, sock, map=map)
         self.nid = nid
         self.remote = None
         self.addr = None
-        self.store = store
+        self.store = sstore
         self.await_advance = collections.deque()
         self.await_data = collections.deque()
         self.max_outstanding = 0
@@ -98,7 +95,7 @@ class SyncConnection(async.Connection):
     def on_summary_header(self, seq, rtype, hid, slen):
         callback = lambda summary: self.on_summary(seq, rtype, hid, summary)
         self.recv_buffer(slen, callback)
-        
+
     def on_summary(self, seq, rtype, hid, summary):
         need_data = self.store.on_summary(rtype, hid, summary)
         if need_data:
@@ -161,9 +158,9 @@ class SyncConnection(async.Connection):
             self.send_buffer(summary)
 
 class SyncPeerConn(SyncConnection):
-    def __init__(self, peer, sock, store, timeout):
+    def __init__(self, peer, sock, sstore, timeout):
         self.peer = peer
-        SyncConnection.__init__(self, peer.nid, store, sock, map=peer.asm.async_map)
+        SyncConnection.__init__(self, peer.nid, sstore, sock, map=peer.asm.async_map)
         self.timer = peer.asm.add_timer(time.time() + timeout, self.timeout)
 
     def on_done(self):
@@ -193,7 +190,7 @@ class SyncServerConn(SyncPeerConn):
         self.recv_buffer(20, self.on_tid)
 
     def on_tid(self, tid):
-        logger.info("%s: received tid: %s", id(self), tid.encode('hex')) 
+        logger.info("%s: received tid: %s", id(self), tid.encode('hex'))
         if tid not in self.peer.stores:
             raise ValueError('Unknown tid')
         self.store = self.peer.stores[tid]
@@ -206,9 +203,9 @@ class SyncClientConn(SyncPeerConn):
         logger.info("Constructing client connection to %s: %s", addr, id(self))
         self.peer = peer
         self.tid = tid
-        store = peer.stores[tid]
+        sstore = peer.stores[tid]
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        SyncPeerConn.__init__(self, peer, sock, store, CONNECT_TIMEOUT + NEGOTIATE_TIMEOUT)
+        SyncPeerConn.__init__(self, peer, sock, sstore, CONNECT_TIMEOUT + NEGOTIATE_TIMEOUT)
         self.addr = addr
         self.connect(addr)
 
@@ -232,12 +229,12 @@ class SyncPeer(asyncore.dispatcher):
 
     def on_timer(self):
         self.asm.add_timer(time.time() + 1, self.on_timer)
-        for tid, store in self.stores.iteritems():
-            store.con.commit()
-        for tid, store in self.stores.iteritems():
-            if store.connections >= GOAL_PEERS:
+        for tid, sstore in self.stores.iteritems():
+            sstore.con.commit()
+        for tid, sstore in self.stores.iteritems():
+            if sstore.connections >= GOAL_PEERS:
                 return
-            peer = store.find_peer()
+            peer = sstore.find_peer()
             if peer == None:
                 return
             logger.info("Making connection to %s", peer)
@@ -247,16 +244,16 @@ class SyncPeer(asyncore.dispatcher):
         pair = self.accept()
         if pair is None:
             return
-        (sock, addr) = pair
+        (sock, addr) = pair # pylint: disable=unpacking-non-sequence
         logger.info("Incoming connection from %s", addr)
         _ = SyncServerConn(self, sock)
 
 class TestSync(unittest.TestCase):
     @staticmethod
-    def add_data(all_data, store, num):
+    def add_data(all_data, sstore, num):
         (hid, summary, body) = record.make_worktoken_record('text/plain', str(num))
         all_data.append(hid)
-        store.on_record(record.RT_WORKTOKEN, hid, summary, body)
+        sstore.on_record(record.RT_WORKTOKEN, hid, summary, body)
 
     def test_simple(self):
         # Make room for 40 cakes
@@ -267,17 +264,16 @@ class TestSync(unittest.TestCase):
         for i in range(20):
             TestSync.add_data(all_data, ss1, i)
         # Make something to sync it to
-        tid2 = ''.join(chr(random.randint(0, 255)) for _ in range(20))
         ss2 = store.SyncStore(tid, ":memory:", 21 * (len('text/plain') + store.RECORD_OVERHEAD))
         # Make some fake socket action
         for i in range(20, 40):
             TestSync.add_data(all_data, ss2, i)
         # Make the connections
         (sock1, sock2) = socket.socketpair()
-        n1 = SyncConnection('a' * 32, ss1, sock1)
-        n2 = SyncConnection('b' * 32, ss2, sock2)
-        n1.start()
-        n2.start()
+        node1 = SyncConnection('a' * 32, ss1, sock1)
+        node2 = SyncConnection('b' * 32, ss2, sock2)
+        node1.start()
+        node2.start()
         # Kick off some async action
         asyncore.loop(timeout=1, count=5)
         # Check the client has records
@@ -286,14 +282,14 @@ class TestSync(unittest.TestCase):
             self.assertTrue(ss2.get_data(2, all_data[i]) is not None)
 
     @staticmethod
-    def make_node(asm, tid, store, port):
+    def make_node(asm, tid, sstore, port):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         local = ('', port)
         sock.bind(local)
         nid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
         stores = {}
-        stores[tid] = store
+        stores[tid] = sstore
         return SyncPeer(asm, nid, stores, sock)
 
     def test_node(self):
@@ -302,7 +298,7 @@ class TestSync(unittest.TestCase):
         ss1 = store.SyncStore(tid, ":memory:", 41 * (len('text/plain') + store.RECORD_OVERHEAD))
         ss2 = store.SyncStore(tid, ":memory:", 41 * (len('text/plain') + store.RECORD_OVERHEAD))
         node1 = TestSync.make_node(asm, tid, ss1, 6000)
-        node2 = TestSync.make_node(asm, tid, ss2, 6001)
+        _ = TestSync.make_node(asm, tid, ss2, 6001)
         all_data = []
         for i in range(20):
             TestSync.add_data(all_data, ss1, i)

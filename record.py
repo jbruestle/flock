@@ -1,3 +1,7 @@
+#!/usr/bin/env python
+# pylint: disable=missing-docstring
+# pylint: disable=too-many-return-statements
+# pylint: disable=too-many-arguments
 
 import hashlib
 import struct
@@ -7,14 +11,15 @@ import random
 import logging
 from Crypto.Hash import SHA256
 from Crypto.PublicKey import RSA
-from Crypto.Signature import PKCS1_PSS
 
 RT_PUBKEY = 0
 RT_WORKTOKEN = 1
 RT_SIGNED = 2
 WT_HALFLIFE = 259200.0  # 3 days, measured in seconds
 
-logger = logging.getLogger('record')
+logger = logging.getLogger('record') # pylint: disable=invalid-name
+
+SEQ_NUM = 0
 
 def worktoken_shared(flat, wtime):
     digest1 = hashlib.sha256(flat).digest()
@@ -28,19 +33,24 @@ def worktoken_shared(flat, wtime):
 def make_pubkey_record(pubkey):
     encoded = pubkey.exportKey('DER')
     hid = hashlib.sha256(encoded).digest()
-    return (hid, '0', encoded) 
+    return (hid, '0', encoded)
 
 def make_worktoken_record(ctype, data):
     assert len(ctype) < 256
     body = chr(len(ctype)) + ctype + data
     hid = hashlib.sha256(body).digest()
-    summary = struct.pack("!LL", int(time.time()), 0)
+    summary = struct.pack("!LL", int(time.time()) - 2, 0)
     return (hid, summary, body)
 
 def make_signed_record(signer, key, ctype, data):
     assert len(ctype) < 256
     hid = hashlib.sha256(key).digest()
-    summary = struct.pack("!L", int(time.time()))
+    summary = struct.pack("!LL", int(time.time()) - 2, SEQ_NUM)
+    # Use of a global sequence number is a hack, but it's
+    # a simple work-around for multiple updates to signed records in
+    # a single second
+    global SEQ_NUM # pylint: disable=global-statement
+    SEQ_NUM += 1
     # Need to use pycrypto's hashes for signatures
     sig_hash = SHA256.new()
     sig_hash.update(hid)
@@ -49,14 +59,14 @@ def make_signed_record(signer, key, ctype, data):
     sig_hash.update(ctype)
     sig_hash.update(data)
     signature = signer.sign(sig_hash)
-    body = signature + chr(len(ctype)) + ctype + data 
+    body = signature + chr(len(ctype)) + ctype + data
     return (hid, summary, body)
 
 def mine_worktoken(hid, count):
     best_score = 0
     best_summary = ''
     wtime = int(time.time())
-    for i in range(count):
+    for _ in range(count):
         nonce = random.randint(0, 0xffffffff)
         summary = struct.pack("!LL", wtime, nonce)
         score = worktoken_shared(hid + summary, wtime)
@@ -65,7 +75,7 @@ def mine_worktoken(hid, count):
             best_summary = summary
     return (best_score, best_summary)
 
-def score_record(rtype, hid, summary): 
+def score_record(rtype, hid, summary):
     if rtype == RT_PUBKEY:
         if summary != '0':
             return -1
@@ -76,14 +86,19 @@ def score_record(rtype, hid, summary):
         (wtime, _) = struct.unpack("!LL", summary)
         return worktoken_shared(hid + summary, wtime)
     elif rtype == RT_SIGNED:
-        if len(summary) != 4:
+        if len(summary) != 8:
             return -1
-        (wtime,) = struct.unpack("!L", summary)
-        return 1e9 + float(wtime) 
+        (wtime, _) = struct.unpack("!LL", summary)
+        return 1e9 + float(wtime)
     else:
         return -1
 
 def validate_pubkey(tid, hid, summary, body):
+    if len(summary) != 8:
+        return False
+    (wtime, _) = struct.unpack("!LL", summary)
+    if wtime > int(time.time()):
+        return False
     if tid != hid[0:20]:
         logger.warning('pubkey doesnt match tid')
         return False
@@ -95,7 +110,7 @@ def validate_pubkey(tid, hid, summary, body):
         return False
     try:
         pubkey = RSA.importKey(body)
-    except Exception:
+    except Exception: # pylint: disable=broad-except
         logger.warning('pubkey not RSA key')
         return False
     if pubkey.has_private():
@@ -107,6 +122,11 @@ def validate_pubkey(tid, hid, summary, body):
     return True
 
 def validate_worktoken(hid, summary, body):
+    if len(summary) != 8:
+        return False
+    (wtime, _) = struct.unpack("!LL", summary)
+    if wtime > int(time.time()):
+        return False
     if len(body) < 3:
         logger.warning('Worktoken body too small')
         return False
@@ -118,7 +138,7 @@ def validate_worktoken(hid, summary, body):
         logger.warning('Worktoken body too small (2)')
         return False
     return hid == hashlib.sha256(body).digest()
-    
+
 def validate_signed(verify, hid, summary, body):
     if verify is None:
         logger.warning('Signed no key to verify')

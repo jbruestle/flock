@@ -1,15 +1,14 @@
-#!/usr/bin/python
+#!/usr/bin/env python
+# pylint: disable=missing-docstring
 
 import os
-import http
 import record
-import hashlib 
-import simplejson as json
+import hashlib
 import store
 import logging
 from Crypto.PublicKey import RSA
 
-logger = logging.getLogger('api')
+logger = logging.getLogger('api') # pylint: disable=invalid-name
 
 class Api(object):
     def __init__(self, stores, store_dir):
@@ -19,9 +18,9 @@ class Api(object):
     def get(self, nid, key):
         if nid not in self.stores:
             return None
-        store = self.stores[nid]
+        the_store = self.stores[nid]
         khash = hashlib.sha256(key).digest()
-        (ctype, data) = store.get_data(record.RT_SIGNED, khash)
+        (ctype, data) = the_store.get_data(record.RT_SIGNED, khash)
         if ctype == 'tombstone' and data == 'tombstone':
             return None
         if ctype == None:
@@ -31,47 +30,41 @@ class Api(object):
     def put(self, nid, key, ctype, body):
         if nid not in self.stores:
             return (404, 'Not Found')
-        store = self.stores[nid]
-        signer = store.signer
+        the_store = self.stores[nid]
+        signer = the_store.signer
         if signer == None:
             return (403, 'Forbidden')
         (hid, summary, data) = record.make_signed_record(signer, key, ctype, body)
-        if not store.on_record(record.RT_SIGNED, hid, summary, data):
+        if not the_store.on_record(record.RT_SIGNED, hid, summary, data):
             raise ValueError('unable to write')
         return (204, 'No Content')
 
     def delete(self, nid, key):
-        if nid not in self.stores:
-            return (404, 'Not Found')
-        store = self.stores[nid]
-        signer = store.get_signer()
-        if signer == None:
-            return (403, 'Forbidden')
-        (hid, summary, data) = record.make_signed_record(signer, key, 'tombstone', 'tombstone')
-        store.on_record(record.RT_SIGNED, hid, summary, data)
-        return (204, 'No Content')
+        self.put(nid, key, 'tombstone', 'tombstone')
 
     def post(self, nid, obj):
         logger.info('Got a post: %s', obj)
         if type(obj) is not dict:
-            return { 'success' : False, 'error' : 'API request a json object' }
+            return {'success' : False, 'error' : 'API request a json object'}
         if 'action' not in obj:
-            return { 'success' : False, 'error' : 'No action specified' }
+            return {'success' : False, 'error' : 'No action specified'}
         action = obj['action']
         if type(action) is not str:
-            return { 'success' : False, 'error' : 'Action must be a string' }
-        if not hasattr(self, 'do_' + action): 
-            return { 'success' : False, 'error' : 'Unknown action' }
-        return getattr(self, 'do_' + action)(obj)
+            return {'success' : False, 'error' : 'Action must be a string'}
+        if not hasattr(self, 'do_' + action):
+            return {'success' : False, 'error' : 'Unknown action'}
+        return getattr(self, 'do_' + action)(nid, obj)
 
-    def do_create_app(self, obj):
+    def do_create_app(self, nid, obj):
+        if nid is not None:
+            return {'success' : False, 'error' : 'create_app on nid not allowed'}
         if 'max_size' not in obj:
-            return { 'success' : False, 'error' : 'create_app requires a storage size' }
+            return {'success' : False, 'error' : 'create_app requires a storage size'}
         max_size = obj['max_size']
         if type(max_size) is not int:
-            return { 'success' : False, 'error' : 'max_size must be an int' }
+            return {'success' : False, 'error' : 'max_size must be an int'}
         if max_size < 0 or max_size > 1*1024*1024*1024:
-            return { 'success' : False, 'error' : 'max_size out of range' }
+            return {'success' : False, 'error' : 'max_size out of range'}
         priv_key = RSA.generate(2048)
         pub_key = priv_key.publickey()
         encoded = pub_key.exportKey('DER')
@@ -80,6 +73,6 @@ class Api(object):
         store_path = os.path.join(self.store_dir, tid.encode('hex'))
         the_store = store.SyncStore(tid, store_path, max_size)
         the_store.set_priv_key(priv_key)
-        self.stores[tid] = the_store 
-        return { 'success' : True, 'tid' : tid.encode('hex') }
-                
+        self.stores[tid] = the_store
+        return {'success' : True, 'tid' : tid.encode('hex')}
+
