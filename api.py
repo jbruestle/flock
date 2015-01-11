@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # pylint: disable=missing-docstring
+# pylint: disable=too-many-return-statements
 
 import record
 import hashlib
@@ -62,5 +63,25 @@ class Api(object):
         if max_size < 0 or max_size > 1*1024*1024*1024:
             return {'success' : False, 'error' : 'max_size out of range'}
         tid = self.node.create_add(max_size)
+        return {'success' : True, 'tid' : tid.encode('hex')}
+
+    def do_join_app(self, nid, obj):
+        if nid is not None:
+            return {'success' : False, 'error' : 'join_app on nid not allowed'}
+        if 'max_size' not in obj:
+            return {'success' : False, 'error' : 'join_app requires a storage size'}
+        max_size = obj['max_size']
+        if type(max_size) is not int:
+            return {'success' : False, 'error' : 'max_size must be an int'}
+        if max_size < 0 or max_size > 1*1024*1024*1024:
+            return {'success' : False, 'error' : 'max_size out of range'}
+        if 'tid' not in obj:
+            return {'success' : False, 'error' : 'join_app requires a tid'}
+        tid = obj['tid']
+        try:
+            tid = tid.decode('hex')
+        except TypeError:
+            return {'success' : False, 'error' : 'join_app, unable to parse tid'}
+        self.node.join_app(tid, max_size)
         return {'success' : True, 'tid' : tid.encode('hex')}
 

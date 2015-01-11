@@ -106,6 +106,13 @@ class Node(object):
             lambda addr: self.__on_peer(tid, addr))
         return tid
 
+    def join_app(self, tid, max_size):
+        store_path = os.path.join(self.store_dir, tid.encode('hex'))
+        the_store = store.SyncStore(tid, store_path, max_size)
+        self.stores[tid] = the_store
+        self.dht.add_location(tid, self.net_conn.ext_port,
+            lambda addr: self.__on_peer(tid, addr))
+
     def run(self):
         self.asm.run()
 
