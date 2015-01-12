@@ -229,9 +229,13 @@ class TestNodes(unittest.TestCase):
         self.assertTrue(resp['success'])
         self.connect(tid, node1, node2)
         self.connect(tid, node2, node1)
-        time.sleep(10)
+        time.sleep(5)
         val = self.send_get(node2, tid, 'foo')
-        self.assertTrue(val == 'Hello')
+        status = self.send_put(node1, tid, 'bar', 'World')
+        self.assertTrue(status == 204)
+        time.sleep(5)
+        val = self.send_get(node2, tid, 'bar')
+        self.assertTrue(val == 'World')
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)

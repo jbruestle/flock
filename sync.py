@@ -164,6 +164,8 @@ class SyncPeerConn(SyncConnection):
         self.timer = peer.asm.add_timer(time.time() + timeout, self.timeout)
 
     def on_done(self):
+        # TODO: This is needlessly linear
+        self.peer.connections.remove(self)
         if self.timer is not None:
             self.peer.asm.cancel(self.timer)
 
@@ -221,6 +223,7 @@ class SyncPeer(asyncore.dispatcher):
         self.asm = asm
         self.stores = stores
         self.nid = nid
+        self.connections = []
         asyncore.dispatcher.__init__(self, sock=sock, map=self.asm.async_map)
         self.listen(5)
 
@@ -231,6 +234,9 @@ class SyncPeer(asyncore.dispatcher):
 
     def on_timer(self):
         self.asm.add_timer(time.time() + 1, self.on_timer)
+        for conn in self.connections:
+            # TODO: This is an ineffient way to do this
+            conn.fill_queue()
         for tid, sstore in self.stores.iteritems():
             sstore.con.commit()
         for tid, sstore in self.stores.iteritems():
@@ -240,7 +246,7 @@ class SyncPeer(asyncore.dispatcher):
             if peer == None:
                 return
             logger.info("Making connection to %s", peer)
-            _ = SyncClientConn(self, tid, peer)
+            self.connections.append(SyncClientConn(self, tid, peer))
 
     def handle_accept(self):
         pair = self.accept()
@@ -248,7 +254,7 @@ class SyncPeer(asyncore.dispatcher):
             return
         (sock, addr) = pair # pylint: disable=unpacking-non-sequence
         logger.info("Incoming connection from %s", addr)
-        _ = SyncServerConn(self, sock)
+        self.connections.append(SyncServerConn(self, sock))
 
 class TestSync(unittest.TestCase):
     @staticmethod

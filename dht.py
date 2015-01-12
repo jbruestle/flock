@@ -343,6 +343,10 @@ class Dht(object):
         logger.info("DHT: adding location %s", tid.encode('hex'))
         loc = DhtLocation(self, tid, port, callback)
         self.locations[tid] = loc
+        for tid, loc in self.locations.iteritems():
+            for bucket in loc.buckets:
+                for addr, node in bucket.all_nodes.iteritems():
+                    loc.add_node(node.addr, node.nid)
         return loc
 
     def bootstrap_node(self, addr):
