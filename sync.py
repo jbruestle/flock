@@ -194,7 +194,9 @@ class SyncServerConn(SyncPeerConn):
         if tid not in self.peer.stores:
             raise ValueError('Unknown tid')
         self.store = self.peer.stores[tid]
-        if self.store.connections >= MAX_PEERS:
+        self.store.connections += 1
+        logger.info("%s: Incrementing connection on server: %d", id(self), self.store.connections)
+        if self.store.connections > MAX_PEERS:
             raise ValueError('Too many connections')
         self.start()
 

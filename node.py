@@ -229,7 +229,7 @@ class TestNodes(unittest.TestCase):
         self.assertTrue(resp['success'])
         self.connect(tid, node1, node2)
         self.connect(tid, node2, node1)
-        time.sleep(2)
+        time.sleep(10)
         val = self.send_get(node2, tid, 'foo')
         self.assertTrue(val == 'Hello')
 

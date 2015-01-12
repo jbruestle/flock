@@ -261,6 +261,7 @@ class DhtLocation(object):
         self.timer = None
         self.peers = collections.OrderedDict()
         self.on_found_peer = callback
+        self.start_timer()
 
     def __shared_bits(self, nid1, nid2):
         _ = self
@@ -339,6 +340,7 @@ class Dht(object):
         self.rpc.add_handler('announce', self.__announce_request)
 
     def add_location(self, tid, port, callback):
+        logger.info("DHT: adding location %d", tid)
         loc = DhtLocation(self, tid, port, callback)
         self.locations[tid] = loc
         return loc

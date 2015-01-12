@@ -119,7 +119,7 @@ class SyncStore(object):
         self.cur.execute("UPDATE ips SET busy = 1, dtime = ? WHERE ip = ? AND port = ?",
             (dtime, ipaddr, port))
         self.connections += 1
-        logger.info("Connections = %d", self.connections)
+        logger.info("Adding find peer, Connections = %d", self.connections)
         return (ipaddr, port)
 
     def on_connect(self, addr, nid):
@@ -145,9 +145,6 @@ class SyncStore(object):
                 "UPDATE ips SET ctime = ?, dtime = 1, wtime = 0 " +
                 "WHERE ip = ? AND port = ?",
                 (int(time.time()), addr[0], addr[1]))
-        else:
-            self.connections += 1
-            logger.info("Connections = %d", self.connections)
 
         return seq
 

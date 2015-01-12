@@ -168,7 +168,7 @@ def setup_network(cfg):
     # Check if it's private
     if ipv4.is_private:
         # Yup, let's try upnp first
-        eport = cfg.get('goal_ext_iport', 58892)
+        eport = cfg.get('goal_ext_port', 58892)
         upnp_res = setup_upnp(local, eport)
         if upnp_res:
             return UPNPConfig(sock, local, upnp_res)
