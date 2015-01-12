@@ -6,6 +6,7 @@ import asyncore
 import bencode
 import struct
 import socket
+import errno
 import time
 import random
 import bintrees
@@ -49,7 +50,12 @@ class DhtRpc(asyncore.dispatcher):
             'a' : args
         }
         raw = bencode.bencode(req)
-        self.sendto(raw, addr)
+        try:
+            self.sendto(raw, addr)
+        except socket.error as serr:
+            if serr.errno != errno.EAGAIN:
+                raise serr
+            # Ignore EAGAIN and drop packets
 
     def add_handler(self, name, callback):
         self.handlers[name] = callback
