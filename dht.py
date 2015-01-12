@@ -340,7 +340,7 @@ class Dht(object):
         self.rpc.add_handler('announce', self.__announce_request)
 
     def add_location(self, tid, port, callback):
-        logger.info("DHT: adding location %d", tid)
+        logger.info("DHT: adding location %s", tid.encode('hex'))
         loc = DhtLocation(self, tid, port, callback)
         self.locations[tid] = loc
         return loc
