@@ -15,7 +15,7 @@ def main():
     # Logging system GO
     logging.basicConfig(level=logging.INFO)
 
-    the_node = node.Node(args.dir, {}, {}, {})
+    the_node = node.Node(args.dir, {})
     the_node.run()
 
 main()

@@ -42,11 +42,11 @@ class AsyncMgr(object):
     def run(self, max_time=None):
         self.running = True
         if max_time is not None:
-            self.add_timer(time.time() + max_time, self.__stop)
+            self.add_timer(time.time() + max_time, self.stop)
         while self.running:
             self.step()
 
-    def __stop(self):
+    def stop(self):
         self.running = False
 
 class Connection(asynchat.async_chat):

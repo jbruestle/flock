@@ -43,13 +43,13 @@ def make_worktoken_record(ctype, data):
     return (hid, summary, body)
 
 def make_signed_record(signer, key, ctype, data):
+    global SEQ_NUM # pylint: disable=global-statement
     assert len(ctype) < 256
     hid = hashlib.sha256(key).digest()
     summary = struct.pack("!LL", int(time.time()) - 2, SEQ_NUM)
     # Use of a global sequence number is a hack, but it's
     # a simple work-around for multiple updates to signed records in
     # a single second
-    global SEQ_NUM # pylint: disable=global-statement
     SEQ_NUM += 1
     # Need to use pycrypto's hashes for signatures
     sig_hash = SHA256.new()
@@ -58,6 +58,7 @@ def make_signed_record(signer, key, ctype, data):
     sig_hash.update(chr(len(ctype)))
     sig_hash.update(ctype)
     sig_hash.update(data)
+    logger.debug("Signing data: %s", sig_hash.digest().encode('hex'))
     signature = signer.sign(sig_hash)
     body = signature + chr(len(ctype)) + ctype + data
     return (hid, summary, body)
@@ -94,11 +95,6 @@ def score_record(rtype, hid, summary):
         return -1
 
 def validate_pubkey(tid, hid, summary, body):
-    if len(summary) != 8:
-        return False
-    (wtime, _) = struct.unpack("!LL", summary)
-    if wtime > int(time.time()):
-        return False
     if tid != hid[0:20]:
         logger.warning('pubkey doesnt match tid')
         return False
@@ -123,9 +119,11 @@ def validate_pubkey(tid, hid, summary, body):
 
 def validate_worktoken(hid, summary, body):
     if len(summary) != 8:
+        logger.warning('Worktoken summary size is wrong')
         return False
     (wtime, _) = struct.unpack("!LL", summary)
     if wtime > int(time.time()):
+        logger.warning('Worktoken time in the future')
         return False
     if len(body) < 3:
         logger.warning('Worktoken body too small')
@@ -140,6 +138,13 @@ def validate_worktoken(hid, summary, body):
     return hid == hashlib.sha256(body).digest()
 
 def validate_signed(verify, hid, summary, body):
+    if len(summary) != 8:
+        logger.warning('Signed summary size is wrong')
+        return False
+    (wtime, _) = struct.unpack("!LL", summary)
+    if wtime > int(time.time()):
+        logger.warning('Signed time in the future')
+        return False
     if verify is None:
         logger.warning('Signed no key to verify')
         return False
@@ -153,11 +158,11 @@ def validate_signed(verify, hid, summary, body):
     if len(body) < (256 + 1 + ctypelen + 1):
         logger.warning('Signed body too small (2)')
         return False
-    summary = struct.pack("!L", int(time.time()))
     sig_hash = SHA256.new()
     sig_hash.update(hid)
     sig_hash.update(summary)
     sig_hash.update(body[256:])
+    logger.debug("Verifying data: %s", sig_hash.digest().encode('hex'))
     if not verify.verify(sig_hash, body[0:256]):
         logger.warning('Signed record, signature failure')
         return False

@@ -143,30 +143,33 @@ class UPNPConfig(BaseConfig):
             return False
         return True
 
-def autodetect_config(cfg={}): # pylint: disable=dangerous-default-value
-    iport = cfg.get('int_port', 58892)
-    eport = cfg.get('ext_iport', 58892)
-    # Check that I have IPv4 to somewhere
-    logger.info("Doing network autoconf")
-    ipv4 = get_ipv4_default_addr()
-    if ipv4 is None:
-        # TODO: ipv6
-        logger.warning("No external IPv4 found")
-        return None
+def setup_network(cfg):
+    logger.info("Doing network setup")
+    if cfg.get('sync_local', False):
+        ipv4 = '127.0.0.1'
+    else:
+        ipv4 = get_ipv4_default_addr()
+        if ipv4 is None:
+            # TODO: ipv6
+            logger.warning("No external IPv4 found")
+            return None
+
+    iport = cfg.get('sync_port', 58892)
 
     # Make a socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     local = (str(ipv4), iport)
     sock.bind(local)
+
+    if cfg.get('sync_local', False):
+        return BaseConfig(sock, ipv4, iport)
 
     # Check if it's private
     if ipv4.is_private:
         # Yup, let's try upnp first
-        upnp_res = None
-        #try:
+        eport = cfg.get('goal_ext_iport', 58892)
         upnp_res = setup_upnp(local, eport)
-        #except Exception as e:
-        #    pass
         if upnp_res:
             return UPNPConfig(sock, local, upnp_res)
         # TODO: Try NatPMP
@@ -178,7 +181,7 @@ def autodetect_config(cfg={}): # pylint: disable=dangerous-default-value
 
 def main():
     logging.basicConfig(level=logging.DEBUG)
-    config = autodetect_config()
+    config = setup_network({})
     _ = select.select([config.is_done], [], [], 30)
     config.stop()
 

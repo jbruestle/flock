@@ -88,13 +88,13 @@ class HttpConnection(async.Connection):
             self.send_error(404, "Not Found")
             return
         try:
-            nid = req.path[1:41].decode('hex')
+            tid = req.path[1:41].decode('hex')
         except TypeError:
             self.send_error(404, "Not Found")
             return
         key = req.path[42:]
         if req.command == 'GET':
-            getr = self.server.api.get(nid, key)
+            getr = self.server.api.get(tid, key)
             if getr == None:
                 self.send_error(404, "Not Found")
                 return
@@ -106,9 +106,9 @@ class HttpConnection(async.Connection):
             return
 
         if req.command == 'PUT':
-            (status, mesg) = self.server.api.put(nid, key, ctype, body)
+            (status, mesg) = self.server.api.put(tid, key, ctype, body)
         else:
-            (status, mesg) = self.server.api.put(nid, key, ctype, body)
+            (status, mesg) = self.server.api.put(tid, key, ctype, body)
 
         if status == 204:
             self.write_no_body(status, mesg)
@@ -127,15 +127,15 @@ class HttpConnection(async.Connection):
         if req.path[0] != '/':
             self.send_error(404, "Not Found")
             return
-        nid = None
+        tid = None
         if len(req.path) == 41:
             try:
-                nid = req.path[1:41].decode('hex')
+                tid = req.path[1:41].decode('hex')
             except TypeError:
                 self.send_error(404, "Not Found")
                 return
         try:
-            jout = self.server.api.post(nid, obj)
+            jout = self.server.api.post(tid, obj)
         except Exception: # pylint: disable=broad-except
             logger.warning("%s: got error: %s", id(self), sys.exc_info()[1])
             logger.warning("%s", traceback.format_exc())
@@ -151,7 +151,7 @@ class HttpConnection(async.Connection):
         self.write_response(resp, None)
 
     def write_response(self, resp, body):
-        self.push("HTTP/1.1 %d: %s\r\n" % (resp.status, resp.message))
+        self.push("HTTP/1.1 %d %s\r\n" % (resp.status, resp.message))
         headers = dict(resp.headers)
         if body is not None:
             headers['Content-Length'] = str(len(body))
@@ -171,12 +171,13 @@ class HttpConnection(async.Connection):
         self.write_response(resp, body)
 
 class HttpServer(asyncore.dispatcher):
-    def __init__(self, asm, api, cfg={}): # pylint: disable=dangerous-default-value
+    def __init__(self, asm, api, cfg):
         self.asm = asm
         self.api = api
+        self.port = cfg.get('http_port', 8000)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(('127.0.0.1', cfg.get('port', 8000)))
+        sock.bind(('127.0.0.1', self.port))
         asyncore.dispatcher.__init__(self, sock=sock, map=self.asm.async_map)
         self.listen(5)
 
@@ -193,29 +194,29 @@ class HttpServer(asyncore.dispatcher):
         _ = HttpConnection(sock, self)
 
 class TestApi(object):
-    def get(self, nid, key):
-        _ = (self, nid)
+    def get(self, tid, key):
+        _ = (self, tid)
         if key == 'hello':
             return ('text/plain', 'world')
         return None
 
-    def put(self, nid, key, ctype, body):
-        _ = (self, nid, key, ctype, body)
+    def put(self, tid, key, ctype, body):
+        _ = (self, tid, key, ctype, body)
         return True
 
-    def delete(self, nid, key):
-        _ = (self, nid, key)
+    def delete(self, tid, key):
+        _ = (self, tid, key)
         return True
 
-    def post(self, nid, obj):
-        _ = (self, nid, obj)
+    def post(self, tid, obj):
+        _ = (self, tid, obj)
         return {}
 
 def main():
     logging.basicConfig(level=logging.INFO)
     asm = async.AsyncMgr()
     api = TestApi()
-    _ = HttpServer(asm, api)
+    _ = HttpServer(asm, api, {})
     asm.run()
 
 if __name__ == '__main__':

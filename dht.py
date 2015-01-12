@@ -327,9 +327,9 @@ class DhtLocation(object):
             self.peers.popitem(False)
 
 class Dht(object):
-    def __init__(self, asm, mid, cfg={}): # pylint: disable=dangerous-default-value
+    def __init__(self, asm, mid, cfg):
         self.asm = asm
-        self.rpc = DhtRpc(self, self.asm, cfg.get('port', 6881))
+        self.rpc = DhtRpc(self, self.asm, cfg.get('dht_port', 6881))
         self.mid = mid
         self.locations = {}
         self.add_location(mid, None, None)
@@ -406,7 +406,7 @@ def main():
 
     mid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
     asm = async.AsyncMgr()
-    dht = Dht(asm, mid)
+    dht = Dht(asm, mid, {})
     dht.add_location('aaaabbbbeeeeffff000011112222333366667788'.decode('hex'), 6881, None)
     #dht.add_location('ef43d791e5be5f6a8a39c285cdbbd92a0c23870b'.decode('hex'), 8000)
     for addr in bootstrap:

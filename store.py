@@ -199,6 +199,7 @@ class SyncStore(object):
     def on_record(self, rtype, hid, summary, data):
         # Validate + Score
         if not record.validate_record(rtype, self.tid, self.verify, hid, summary, data):
+            logger.warn("Invalid record, type = %d", rtype)
             return False
         score = record.score_record(rtype, hid, summary)
         # Delete any existing version with lower score
@@ -218,8 +219,9 @@ class SyncStore(object):
             self.cur_size += 100 + len(data)
         # Shrink as needed
         self.__shrink()
-        # Maybe found a pubkey?
+        # Maybe found a pubkey
         if rtype == record.RT_PUBKEY:
+            logger.info("Setting public key")
             self.__set_pubkey(data)
         return True
 
