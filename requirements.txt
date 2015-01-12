@@ -1,0 +1,7 @@
+bintrees
+pycrypto
+bencode
+miniupnpc
+netifaces
+simplejson
+ipaddr

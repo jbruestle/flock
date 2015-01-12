@@ -4,7 +4,7 @@
 import logging
 import argparse
 
-import node
+from flock import node
 
 def main():
     # Parse some params
