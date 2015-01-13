@@ -181,6 +181,7 @@ class TestNodes(unittest.TestCase):
         response = conn.getresponse()
         if response.status != 200:
             conn.close()
+            logger.warn("Got non 200 response to post: %d %s", response.status, response.reason)
             return None
         body = response.read()
         conn.close()
@@ -210,8 +211,7 @@ class TestNodes(unittest.TestCase):
     def connect(self, tid, node1, node2):
         _ = self
         port = node2.net_conn.ext_port
-        result = self.send_post(node1, '/' + tid,
-            {'action' : 'add_peer', 'addr' : '127.0.0.1', 'port' : port})
+        result = self.send_post(node1, '/' + tid + '/add_peer', {'addr' : '127.0.0.1', 'port' : port})
         if not result['success']:
             raise Exception("Failed to issue add_peer")
 
@@ -219,13 +219,15 @@ class TestNodes(unittest.TestCase):
         node1 = self.setup_node()
         node2 = self.setup_node()
         time.sleep(1)
-        resp = self.send_post(node1, "/", {'action' : 'create_app', 'max_size' : 100000})
+        resp = self.send_post(node1, "/create_app", {'max_size' : 100000})
         self.assertTrue(resp['success'])
         logger.debug("Got resp: %s", resp)
         tid = resp['tid']
         status = self.send_put(node1, tid, 'foo', 'Hello')
         self.assertTrue(status == 204)
-        resp = self.send_post(node2, "/", {'action' : 'join_app', 'max_size' : 100000, 'tid' : tid})
+        resp = self.send_post(node1, "/" + tid + "/add_record", {'hello' : 'world'})
+        self.assertTrue(resp['success'])
+        resp = self.send_post(node2, "/" + tid + "/join_app", {'max_size' : 100000})
         self.assertTrue(resp['success'])
         self.connect(tid, node1, node2)
         self.connect(tid, node2, node1)

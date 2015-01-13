@@ -1,10 +1,7 @@
 #!/usr/bin/env python
 # pylint: disable=missing-docstring
 # pylint: disable=too-few-public-methods
-# pylint: disable=too-many-return-statements
-# pylint: disable=too-many-branches
 
-import async
 import asyncore
 import StringIO
 import BaseHTTPServer
@@ -15,7 +12,15 @@ import simplejson as json
 import traceback
 from email.utils import formatdate
 
+import async
+
 logger = logging.getLogger('http') # pylint: disable=invalid-name
+
+class HttpException(Exception):
+    def __init__(self, status, message):
+        Exception.__init__(self, "HTTP Error: %d %s" % (status, message))
+        self.status = status
+        self.message = message
 
 # TODO: The 'reuse' of HttpRequest to parse the request is a bit
 # questionable, since it relies on implementation details, but good
@@ -67,88 +72,77 @@ class HttpConnection(async.Connection):
             self.on_request(req, None, None)
 
     def on_request(self, req, ctype, body):
-        if req.command == 'PUT' or req.command == 'POST':
-            if ctype is None:
-                self.send_error(411, "Length Required")
-                return
-        if req.command == 'POST':
-            if ctype != 'application/json':
-                self.send_error(415, "Unsupported Media Type")
-                return
-            self.on_post(req, body)
-            return
-        if req.command == 'GET' or req.command == 'DELETE':
-            if ctype is not None:
-                self.send_error(400, "No body allowed for method")
-                return
-        if req.command not in ['GET', 'DELETE', 'PUT']:
-            self.send_error(405, "Method Not Allowed")
-            return
-        if len(req.path) < 42 or req.path[0] != '/' or req.path[41] != '/':
-            self.send_error(404, "Not Found")
-            return
         try:
-            tid = req.path[1:41].decode('hex')
+            logger.info("Request %s %s", req.command, req.path)
+            if not hasattr(self, 'on_' + req.command.lower()):
+                raise HttpException(505, "Method not allowed")
+            getattr(self, 'on_' + req.command.lower())(req, ctype, body)
+        except HttpException as herr:
+            logger.info("Got http exception: %d %s", herr.status, herr.message)
+            self.send_error(herr.status, herr.message)
+        except Exception as err: # pylint: disable=broad-except
+            logger.warning("http request: got error: %s", sys.exc_info()[1])
+            logger.warning("%s", traceback.format_exc())
+            self.send_error(500, str(err))
+
+    def parse_tid_url(self, path):
+        _ = self
+        if len(path) < 42 or path[0] != '/' or path[41] != '/':
+            raise HttpException(404, "Not Found")
+        try:
+            tid = path[1:41].decode('hex')
         except TypeError:
-            self.send_error(404, "Not Found")
-            return
-        key = req.path[42:]
-        if req.command == 'GET':
-            getr = self.server.api.get(tid, key)
-            if getr == None:
-                self.send_error(404, "Not Found")
-                return
-            print "Got %s" % (getr,)
-            (rtype, rbody) = getr
-            resp = HttpResponse(200, "OK")
-            resp.add_header('Content-Type', rtype)
-            self.write_response(resp, rbody)
-            return
+            raise HttpException(404, "Not Found")
+        key = path[42:]
+        return (tid, key)
 
-        if req.command == 'PUT':
-            (status, mesg) = self.server.api.put(tid, key, ctype, body)
-        else:
-            (status, mesg) = self.server.api.put(tid, key, ctype, body)
+    def on_get(self, req, ctype, body):
+        _ = body
+        if ctype is not None:
+            raise HttpException(400, "No body allowed for method")
+        (tid, key) = self.parse_tid_url(req.path)
+        (rtype, rbody) = self.server.api.get(tid, key)
+        resp = HttpResponse(200, "OK")
+        resp.add_header('Content-Type', rtype)
+        self.write_response(resp, rbody)
 
-        if status == 204:
-            self.write_no_body(status, mesg)
-        else:
-            self.send_error(status, mesg)
+    def on_put(self, req, ctype, body):
+        _ = body
+        if ctype is None:
+            raise HttpException(411, "Length Required")
+        (tid, key) = self.parse_tid_url(req.path)
+        self.server.api.put(tid, key, ctype, body)
+        resp = HttpResponse(204, "No body")
+        self.write_response(resp, None)
 
-    def on_post(self, req, body):
+    def on_delete(self, req, ctype, body):
+        if ctype is not None:
+            raise HttpException(400, "No body allowed for method")
+        (tid, key) = self.parse_tid_url(req.path)
+        self.server.api.put(tid, key, ctype, body)
+        resp = HttpResponse(204, "No body")
+        self.write_response(resp, None)
+
+    def on_post(self, req, ctype, body):
+        if ctype is None:
+            raise HttpException(411, "Length Required")
+        if ctype != 'application/json':
+            raise HttpException(415, "Unsupported Media Type")
         try:
             obj = json.loads(body)
         except ValueError:
-            self.send_error(400, "Invalid JSON")
-            return
-        if len(req.path) != 1 and len(req.path) != 41:
-            self.send_error(404, "Not Found")
-            return
-        if req.path[0] != '/':
-            self.send_error(404, "Not Found")
-            return
-        tid = None
-        if len(req.path) == 41:
-            try:
-                tid = req.path[1:41].decode('hex')
-            except TypeError:
-                self.send_error(404, "Not Found")
-                return
-        try:
-            jout = self.server.api.post(tid, obj)
-        except Exception: # pylint: disable=broad-except
-            logger.warning("%s: got error: %s", id(self), sys.exc_info()[1])
-            logger.warning("%s", traceback.format_exc())
-            self.send_error(500, "Internal Server Error")
-            return
+            raise HttpException(400, "Invalid JSON")
+        if len(req.path) < 1 or req.path[0] != '/':
+            raise HttpException(404, "Not Found")
+        if '/' in req.path[1:]:
+            (tid, action) = self.parse_tid_url(req.path)
+        else:
+            (tid, action) = (None, req.path[1:])
+        jout = self.server.api.post(tid, action, obj)
         sout = json.dumps(jout)
         resp = HttpResponse(200, "OK")
         resp.add_header('Content-Type', 'application/json')
         self.write_response(resp, sout)
-
-    def write_no_body(self, status, mesg):
-        resp = HttpResponse(status, mesg)
-        self.write_response(resp, None)
 
     def write_response(self, resp, body):
         self.push("HTTP/1.1 %d %s\r\n" % (resp.status, resp.message))
@@ -208,8 +202,8 @@ class TestApi(object):
         _ = (self, tid, key)
         return True
 
-    def post(self, tid, obj):
-        _ = (self, tid, obj)
+    def post(self, tid, action, obj):
+        _ = (self, tid, action, obj)
         return {}
 
 def main():

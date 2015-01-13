@@ -2,7 +2,7 @@
 
 from distutils.core import setup
 setup(
-    name='flock',
+    name='flocksync',
     description='Peer to peer app synchronization protocol',
     url='https://github.com/jbruestle/flock',
     license='MIT',
