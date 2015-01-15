@@ -194,11 +194,10 @@ class DhtBucket(object):
         node.timeout = self.dht.asm.add_timer(time.time() + good_retry,
             lambda: self.__good_node_timeout(node))
         self.__shrink_good()
-        if self.loc.port is not None:
-            self.dht.rpc.send_request(node.addr, 'get_peers',
-                {'id' : self.dht.mid, 'info_hash' : self.loc.tid},
-                lambda resp: self.__get_peers_success(node, resp),
-                lambda err: self.__get_peers_failure(node, err))
+        self.dht.rpc.send_request(node.addr, 'get_peers',
+            {'id' : self.dht.mid, 'info_hash' : self.loc.tid},
+            lambda resp: self.__get_peers_success(node, resp),
+            lambda err: self.__get_peers_failure(node, err))
         slices = [res['nodes'][i:i+26] for i in range(0, len(res['nodes']), 26)]
         for flat in slices:
             nid = flat[0:20]
@@ -230,6 +229,8 @@ class DhtBucket(object):
     def __get_peers_success(self, node, resp):
         if 'token' not in resp or type(resp['token']) is not str:
             logger.debug("%s: No token to echo", node.addr)
+            return
+        if self.loc.port is None:
             return
         self.dht.rpc.send_request(node.addr, 'announce_peer',
             {'id' : self.dht.mid,
@@ -326,9 +327,9 @@ class DhtLocation(object):
         if addr in self.peers:
             return
         # pylint: disable=not-callable
+        logger.info("Found new peer: %s", addr)
         if self.on_found_peer is not None:
             self.on_found_peer(addr)
-        logger.info("Found new peer: %s", addr)
         self.peers[addr] = 1
         while len(self.peers) > LOC_PEERS:
             self.peers.popitem(False)

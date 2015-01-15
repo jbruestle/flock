@@ -81,6 +81,7 @@ class BaseConfig(object):
     def __init__(self, sock, ext_ip, ext_port):
         # Set external variables
         self.sock = sock
+        self.int_port = sock.getsockname()[1]
         self.ext_ip = ext_ip
         self.ext_port = ext_port
         (self.is_done, self.__make_done) = socket.socketpair()
@@ -163,7 +164,7 @@ def setup_network(cfg):
     sock.bind(local)
 
     if cfg.get('sync_local', False):
-        return BaseConfig(sock, ipv4, iport)
+        return BaseConfig(sock, None, None)
 
     # Check if it's private
     if ipv4.is_private:
@@ -173,7 +174,8 @@ def setup_network(cfg):
         if upnp_res:
             return UPNPConfig(sock, local, upnp_res)
         # TODO: Try NatPMP
-        return None
+        # Just give up and use a local setup
+        return BaseConfig(sock, None, None)
     else:
         # Return simple external V4
         logger.info("Looks like an external IP")

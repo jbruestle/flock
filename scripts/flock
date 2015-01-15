@@ -2,14 +2,21 @@
 #pylint: disable=missing-docstring
 
 import logging
+import sys
 import argparse
 
 from flock import node
 
+class DefaultHelpParser(argparse.ArgumentParser):
+    def error(self, message):
+        sys.stderr.write('error: %s\n' % message)
+        self.print_help()
+        sys.exit(2)
+
 def main():
     # Parse some params
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-d", "--dir", help="Storage directory")
+    parser = DefaultHelpParser()
+    parser.add_argument("-d", "--dir", help="Storage directory for apps (required)", required=True)
     args = parser.parse_args()
 
     # Logging system GO

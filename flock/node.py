@@ -190,7 +190,7 @@ class TestNodes(unittest.TestCase):
     def send_put(self, node, tid, key, value):
         _ = self
         conn = httplib.HTTPConnection("localhost:" + str(node.http.port))
-        headers = {"Content-type": "test/plain"}
+        headers = {"Content-type": "application/json"}
         conn.request("PUT", '/' + tid + '/' + key, value, headers)
         response = conn.getresponse()
         _ = response.read()
@@ -210,12 +210,44 @@ class TestNodes(unittest.TestCase):
 
     def connect(self, tid, node1, node2):
         _ = self
-        port = node2.net_conn.ext_port
+        port = node2.net_conn.int_port
         result = self.send_post(node1, '/' + tid + '/add_peer', {'addr' : '127.0.0.1', 'port' : port})
         if not result['success']:
             raise Exception("Failed to issue add_peer")
 
     def test_create_store(self):
+        test_schema1 = json.dumps({
+            "schema": {
+                "test_table": {
+                    "foo" : "int",
+                }
+            },
+            "indexes": [
+                ["test_table", "foo"]
+            ]
+        })
+        test_schema2 = json.dumps({
+            "schema": {
+                "test_table": {
+                    "foo" : "int",
+                    "bar" : "text"
+                }
+            },
+            "indexes": [
+                ["test_table", "bar"]
+            ]
+        })
+        json_record1 = {
+            "_table" : "test_table",
+            "foo" : 10,
+            "bar" : "hello"
+        }
+        json_record2 = {
+            "_table" : "test_table",
+            "foo" : 20,
+            "bar" : "world"
+        }
+
         node1 = self.setup_node()
         node2 = self.setup_node()
         time.sleep(1)
@@ -225,7 +257,9 @@ class TestNodes(unittest.TestCase):
         tid = resp['tid']
         status = self.send_put(node1, tid, 'foo', 'Hello')
         self.assertTrue(status == 204)
-        resp = self.send_post(node1, "/" + tid + "/add_record", {'hello' : 'world'})
+        status = self.send_put(node1, tid, '_schema', test_schema1)
+        self.assertTrue(status == 204)
+        resp = self.send_post(node1, "/" + tid + "/add_record", json_record1)
         self.assertTrue(resp['success'])
         resp = self.send_post(node2, "/" + tid + "/join_app", {'max_size' : 100000})
         self.assertTrue(resp['success'])
@@ -233,11 +267,27 @@ class TestNodes(unittest.TestCase):
         self.connect(tid, node2, node1)
         time.sleep(5)
         val = self.send_get(node2, tid, 'foo')
+        self.assertTrue(val == 'Hello')
+        resp = self.send_post(node2, "/" + tid + "/query", {
+            "query" : "SELECT id, foo FROM test_table"
+        })
+        self.assertTrue(resp['results'][0][1] == 10)
+        status = self.send_put(node1, tid, '_schema', test_schema2)
+        self.assertTrue(status == 204)
         status = self.send_put(node1, tid, 'bar', 'World')
         self.assertTrue(status == 204)
+        resp = self.send_post(node1, "/" + tid + "/add_record", json_record2)
+        self.assertTrue(resp['success'])
         time.sleep(5)
         val = self.send_get(node2, tid, 'bar')
         self.assertTrue(val == 'World')
+        resp = self.send_post(node2, "/" + tid + "/query", {
+            "query" : "SELECT bar FROM test_table WHERE foo = ?",
+            "params" : [20]
+        })
+        print resp
+        self.assertTrue(resp['results'][0][0] == 'world')
+
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)

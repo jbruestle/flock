@@ -6,6 +6,7 @@ import logging
 
 import record
 from http import HttpException
+import simplejson as json
 
 logger = logging.getLogger('api') # pylint: disable=invalid-name
 
@@ -78,6 +79,7 @@ class Api(object):
         max_size = self.__require_int(obj, 'max_size')
         if max_size < 0 or max_size > 1*1024*1024*1024:
             raise HttpException(400, "max_size out of range")
+        logger.info('create_app: max_size = %d', max_size)
         tid = self.node.create_app(max_size)
         return {'success' : True, 'tid' : tid.encode('hex')}
 
@@ -85,17 +87,36 @@ class Api(object):
         max_size = self.__require_int(obj, 'max_size')
         if max_size < 0 or max_size > 1*1024*1024*1024:
             raise HttpException(400, "max_size out of range")
+        logger.info('join_app: tid = %s, max_size = %d', tid.encode('hex'), max_size)
         self.node.join_app(tid, max_size)
         return {'success' : True}
 
     def tact_add_peer(self, tid, obj):
         addr = self.__require_str(obj, 'addr')
         port = self.__require_int(obj, 'port')
+        logger.info('add_peer: tid = %s, addr = %s', tid.encode('hex'), (addr, port))
         self.node.on_peer(tid, (addr, port))
         return {'success' : True}
 
     def tact_add_record(self, tid, obj):
+        logger.info('Got a add_record: tid = %s, val= %s', tid.encode('hex'), obj)
         if tid not in self.node.stores:
-            return None
-        return {'success' : True}
+            raise HttpException(404, "Not Found")
+        the_store = self.node.stores[tid]
+        (hid, _, body) = record.make_worktoken_record('application/json', json.dumps(obj))
+        (_, summary) = record.mine_worktoken(hid, 1000)
+        the_store.on_record(record.RT_WORKTOKEN, hid, summary, body)
+        return {'success' : True, 'id' : hid.encode('base64')[:-1]}
+
+    def tact_query(self, tid, obj):
+        logger.info('Got a query: tid = %s, val= %s', tid.encode('hex'), obj)
+        if tid not in self.node.stores:
+            raise HttpException(404, "Not Found")
+        the_store = self.node.stores[tid]
+        query = self.__require_str(obj, 'query')
+        params = []
+        if 'params' in obj:
+            params = obj['params']
+        results = the_store.run_query(query, params)
+        return {'success' : True, 'results' : results}
 
