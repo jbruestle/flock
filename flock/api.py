@@ -8,6 +8,7 @@ import simplejson as json
 
 from flock.http import HttpException
 from flock import record
+from flock import store
 
 logger = logging.getLogger('api') # pylint: disable=invalid-name
 
@@ -44,6 +45,12 @@ class Api(object):
         logger.info('Got a DELETE: tid = %s, key = %s', tid.encode('hex'), key)
         self.put(tid, key, 'tombstone', 'tombstone')
 
+    def __optional(self, obj, field, default):
+        _ = self
+        if field not in obj:
+            return default
+        return obj[field]
+
     def __require(self, obj, field):
         _ = self
         if field not in obj:
@@ -51,6 +58,12 @@ class Api(object):
         return obj[field]
 
     def __require_int(self, obj, field):
+        val = self.__require(obj, field)
+        if type(val) is not int:
+            raise HttpException(400, "Field " + field + " not an integer")
+        return val
+
+    def __optional_int(self, obj, field, default):
         val = self.__require(obj, field)
         if type(val) is not int:
             raise HttpException(400, "Field " + field + " not an integer")
@@ -77,7 +90,7 @@ class Api(object):
         raise HttpException(400, "Unknown action")
 
     def gact_create_app(self, obj):
-        max_size = self.__require_int(obj, 'max_size')
+        max_size = self.__optional_int(obj, 'max_size', store.DEFAULT_APP_SIZE)
         if max_size < 0 or max_size > 1*1024*1024*1024:
             raise HttpException(400, "max_size out of range")
         logger.info('create_app: max_size = %d', max_size)
@@ -85,7 +98,7 @@ class Api(object):
         return {'success' : True, 'tid' : tid.encode('hex')}
 
     def tact_join_app(self, tid, obj):
-        max_size = self.__require_int(obj, 'max_size')
+        max_size = self.__optional_int(obj, 'max_size', store.DEFAULT_APP_SIZE)
         if max_size < 0 or max_size > 1*1024*1024*1024:
             raise HttpException(400, "max_size out of range")
         logger.info('join_app: tid = %s, max_size = %d', tid.encode('hex'), max_size)
