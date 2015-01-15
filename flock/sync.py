@@ -2,6 +2,7 @@
 # pylint: disable=missing-docstring
 # pylint: disable=too-many-instance-attributes
 # pylint: disable=too-few-public-methods
+# pylint: disable=bad-continuation
 
 import collections
 import time
@@ -60,7 +61,7 @@ class SyncConnection(async.Connection):
         if magic != '0net':
             logger.debug("Invalid magic")
             raise ValueError('Invalid magic')
-        self.recv_seq = self.store.on_connect(self.addr, remote)
+        self.recv_seq = self.store.on_connect(self.getpeername(), remote, self.addr is not None)
         if self.recv_seq == None:
             raise ValueError('Already connected to remote')
         self.remote = remote
@@ -180,31 +181,32 @@ class SyncPeerConn(SyncConnection):
     def timeout(self):
         self.timer = None
         if self.remote is None:
-            logger.info("%s: Negotiation not complete, remote = %s", id(self), self.addr)
+            logger.debug("%s: Negotiation not complete, remote = %s", id(self), self.addr)
             self.close()
             self.handle_close()
 
 class SyncServerConn(SyncPeerConn):
     def __init__(self, peer, sock):
-        logger.info("Constructing server connection: %s", id(self))
+        logger.debug("Constructing server connection: %s", id(self))
         self.peer = peer
         SyncPeerConn.__init__(self, peer, sock, None, NEGOTIATE_TIMEOUT)
         self.recv_buffer(20, self.on_tid)
 
     def on_tid(self, tid):
-        logger.info("%s: received tid: %s", id(self), tid.encode('hex'))
+        logger.debug("%s: received tid: %s", id(self), tid.encode('hex'))
         if tid not in self.peer.stores:
             raise ValueError('Unknown tid')
         self.store = self.peer.stores[tid]
         self.store.connections += 1
-        logger.info("%s: Incrementing connection on server: %d", id(self), self.store.connections)
         if self.store.connections > MAX_PEERS:
             raise ValueError('Too many connections')
+        logger.info("Incoming connection from %s tid: %s, connections = %d",
+            self.peer, tid.encode('hex'), self.store.connections)
         self.start()
 
 class SyncClientConn(SyncPeerConn):
     def __init__(self, peer, tid, addr):
-        logger.info("Constructing client connection to %s: %s", addr, id(self))
+        logger.debug("Constructing client connection to %s: %s", addr, id(self))
         self.peer = peer
         self.tid = tid
         sstore = peer.stores[tid]
@@ -214,7 +216,7 @@ class SyncClientConn(SyncPeerConn):
         self.connect(addr)
 
     def handle_connect(self):
-        logger.info("%s: sending tid: %s", id(self), self.tid.encode('hex'))
+        logger.debug("%s: sending tid: %s", id(self), self.tid.encode('hex'))
         self.send_buffer(self.tid)
         self.start()
 
@@ -245,7 +247,7 @@ class SyncPeer(asyncore.dispatcher):
             peer = sstore.find_peer()
             if peer == None:
                 return
-            logger.info("Making connection to %s", peer)
+            logger.debug("Making connection to %s", peer)
             self.connections.append(SyncClientConn(self, tid, peer))
 
     def handle_accept(self):

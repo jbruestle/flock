@@ -230,14 +230,6 @@ class DhtBucket(object):
         if 'token' not in resp or type(resp['token']) is not str:
             logger.debug("%s: No token to echo", node.addr)
             return
-        if self.loc.port is None:
-            return
-        self.dht.rpc.send_request(node.addr, 'announce_peer',
-            {'id' : self.dht.mid,
-             'implied_port' : 0, 'info_hash' : self.loc.tid,
-             'port' : self.loc.port, 'token' : resp['token']},
-             lambda resp: None,
-             lambda err: self.__announce_failure(node, err))
         if 'values' not in resp:
             return
         if type(resp['values']) is not list:
@@ -249,6 +241,14 @@ class DhtBucket(object):
             ipaddr = socket.inet_ntoa(peer[0:4])
             port = struct.unpack('!H', peer[4:6])[0]
             self.loc.found_peer((ipaddr, port))
+        if self.loc.port is None:
+            return
+        self.dht.rpc.send_request(node.addr, 'announce_peer',
+            {'id' : self.dht.mid,
+             'implied_port' : 0, 'info_hash' : self.loc.tid,
+             'port' : self.loc.port, 'token' : resp['token']},
+             lambda resp: None,
+             lambda err: self.__announce_failure(node, err))
 
     def __get_peers_failure(self, node, err):
         _ = self

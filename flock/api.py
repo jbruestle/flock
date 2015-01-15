@@ -64,7 +64,7 @@ class Api(object):
         return val
 
     def __optional_int(self, obj, field, default):
-        val = self.__require(obj, field)
+        val = self.__optional(obj, field, default)
         if type(val) is not int:
             raise HttpException(400, "Field " + field + " not an integer")
         return val
@@ -91,6 +91,7 @@ class Api(object):
 
     def gact_create_app(self, obj):
         max_size = self.__optional_int(obj, 'max_size', store.DEFAULT_APP_SIZE)
+        logger.debug("max_size = %d", max_size)
         if max_size < 0 or max_size > 1*1024*1024*1024:
             raise HttpException(400, "max_size out of range")
         logger.info('create_app: max_size = %d', max_size)

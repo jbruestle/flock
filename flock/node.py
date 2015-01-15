@@ -26,8 +26,6 @@ from flock import store
 from flock import http
 from flock import api
 
-DEFAULT_APP_SIZE = 10*1024*1024
-
 logger = logging.getLogger('http') # pylint: disable=invalid-name
 
 class Node(object):
@@ -53,7 +51,7 @@ class Node(object):
             except Exception: # pylint: disable=broad-except
                 continue
             # TODO: Max size?
-            nstore = store.SyncStore(tid, os.path.join(self.store_dir, bname), DEFAULT_APP_SIZE)
+            nstore = store.SyncStore(tid, os.path.join(self.store_dir, bname), store.DEFAULT_APP_SIZE)
             self.stores[tid] = nstore
 
     def __setup_dht(self):

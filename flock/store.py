@@ -17,6 +17,7 @@ from flock import record
 from flock import schema
 
 RECORD_OVERHEAD = 100
+DEFAULT_APP_SIZE = 100*1024*1024
 SCHEMA_HID = hashlib.sha256('_schema').digest()
 
 logger = logging.getLogger('store') # pylint: disable=invalid-name
@@ -137,22 +138,19 @@ class SyncStore(object):
             (time.time(),))
         row = self.cur.fetchone()
         if row == None:
-            logger.debug("Finding _peers, no result")
+            logger.debug("Finding peers, no result")
             return None
         (ipaddr, port, dtime) = row
-        logger.info("Finding _peers: r = %s, dtime = %s", (ipaddr, port), dtime)
+        logger.debug("Finding _peers: r = %s, dtime = %s", (ipaddr, port), dtime)
         dtime *= 2
         self.cur.execute("UPDATE _ips SET busy = 1, dtime = ? WHERE ip = ? AND port = ?",
             (dtime, ipaddr, port))
         self.connections += 1
-        logger.info("Adding find peer, Connections = %d", self.connections)
+        logger.debug("Adding find peer, Connections = %d", self.connections)
         return (ipaddr, port)
 
-    def on_connect(self, addr, nid):
-        nstr = None
-        if nid is not None:
-            nstr = nid.encode('hex')
-        logger.info("on_connect, addr = %s, nid = %s", addr, nstr)
+    def on_connect(self, addr, nid, outbound):
+        logger.debug("on_connect, addr = %s, nid = %s", addr, nid.encode('hex'))
         self.cur.execute("SELECT busy, seq from _peers WHERE nid = ?", (buffer(nid),))
         row = self.cur.fetchone()
         if row is not None and row[0] == 1:
@@ -165,8 +163,11 @@ class SyncStore(object):
         else:
             self.cur.execute("UPDATE _peers SET busy = 1 WHERE nid = ?", (buffer(nid),))
             seq = row[0]
+        
+        logger.info("Add connection: remote = %s, outbound = %s, tid = %s, nid = %s",
+            addr, outbound, self.tid.encode('hex'), nid.encode('hex'))
 
-        if addr is not None:
+        if outbound:
             self.cur.execute(
                 "UPDATE _ips SET ctime = ?, dtime = 1, wtime = 0 " +
                 "WHERE ip = ? AND port = ?",
@@ -179,10 +180,12 @@ class SyncStore(object):
         nstr = None
         if nid is not None:
             nstr = nid.encode('hex')
-        logger.info("on_disconnect, addr = %s, nid = %s", addr, nstr)
-        logger.info("Connections = %d", self.connections)
+        logger.debug("on_disconnect, addr = %s, nid = %s", addr, nstr)
+        logger.debug("Connections = %d", self.connections)
         if nid is not None:
             self.cur.execute("UPDATE _peers SET busy = 0 WHERE nid = ?", (buffer(nid),))
+            logger.info("Drop connection: tid = %s, nid = %s",
+                self.tid.encode('hex'), nid.encode('hex'))
         if addr is not None:
             self.cur.execute(
                 "UPDATE _ips SET busy = 0, wtime = dtime + ? WHERE ip = ? AND port = ?",

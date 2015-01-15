@@ -54,6 +54,8 @@ developing apps
 ===============
 [TODO: Describe which type of *apps* are appropriate]
 
+While you read this, please feel free to take a peek at the example app, including in the `example` directory in the flock source.
+
 First, you need to create a new app, which is just a POST:
 
 ```
@@ -84,7 +86,7 @@ In the flock model, most of the application logic lives client side, but the flo
 
 4) The application can then run arbitrary read-only queries on the resulting database via an AJAX call.
 
-Specifically, there are only 2 POST calls needed to do record storage and retrieval, along with the standard PUT method for writing static content, including the special schema file, `\_schema`
+Specifically, there are only 2 POST calls needed to do record storage and retrieval, along with the standard PUT method for writing static content, including the special schema file, `_schema`
 
 Schema
 ------
@@ -143,7 +145,7 @@ TODO: Explain full-text, generally, write some more about schemas
 Adding data
 -----------
 
-To POST a record, send a POST to `localhost:8000/<ID>/add\_record`, or from the applicaiton local perspective, just 'add\_record'.  This POST must have content type of `application/json`.  Generally, the records will be JSON objects.  One of the fields is '_table', which determines which of the tables in schema the records will be put into.  The remaining fields are the columns (not including the 'implicit' columns.  For example:
+To POST a record, send a POST to `localhost:8000/<ID>/add_record`, or from the applicaiton local perspective, just `add_record`.  This POST must have content type of `application/json`.  Generally, the records will be JSON objects.  One of the fields is '_table', which determines which of the tables in schema the records will be put into.  The remaining fields are the columns (not including the 'implicit' columns.  For example:
 
 ```
 {    "_table" : comment, 
