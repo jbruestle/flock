@@ -25,7 +25,7 @@ NEGOTIATE_TIMEOUT = 2
 HELLO_FMT = '!4s20s'  # Magic #, ID
 HELLO_ACK_FMT = '!QL'  # Seq No, Buffer size
 SUMMARY_HDR_FMT = '!QB32sB' # Seq No, RType, Hash, Summary Size
-DATA_HDR_FMT = '!H' # Data size
+DATA_HDR_FMT = '!L' # Data size
 ADVANCE_FMT = '!?'
 
 class SyncConnection(async.Connection):
