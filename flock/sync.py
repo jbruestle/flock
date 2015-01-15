@@ -11,9 +11,9 @@ import unittest
 import logging
 import random
 
-import store
-import async
-import record
+from flock import store
+from flock import async
+from flock import record
 
 logger = logging.getLogger('sync') # pylint: disable=invalid-name
 

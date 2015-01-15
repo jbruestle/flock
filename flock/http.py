@@ -12,7 +12,7 @@ import simplejson as json
 import traceback
 from email.utils import formatdate
 
-import async
+from flock import async
 
 logger = logging.getLogger('http') # pylint: disable=invalid-name
 

@@ -18,13 +18,13 @@ import threading
 import simplejson as json
 import time
 
-import dht
-import nat
-import async
-import sync
-import store
-import http
-import api
+from flock import dht
+from flock import nat
+from flock import async
+from flock import sync
+from flock import store
+from flock import http
+from flock import api
 
 logger = logging.getLogger('http') # pylint: disable=invalid-name
 
@@ -211,7 +211,8 @@ class TestNodes(unittest.TestCase):
     def connect(self, tid, node1, node2):
         _ = self
         port = node2.net_conn.int_port
-        result = self.send_post(node1, '/' + tid + '/add_peer', {'addr' : '127.0.0.1', 'port' : port})
+        result = self.send_post(node1, '/' + tid + '/add_peer',
+            {'addr' : '127.0.0.1', 'port' : port})
         if not result['success']:
             raise Exception("Failed to issue add_peer")
 

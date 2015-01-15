@@ -13,7 +13,7 @@ import bintrees
 import collections
 import logging
 
-import async
+from flock import async
 
 logger = logging.getLogger('dht') # pylint: disable=invalid-name
 
@@ -352,7 +352,7 @@ class Dht(object):
         self.locations[tid] = loc
         for tid, loc in self.locations.iteritems():
             for bucket in loc.buckets:
-                for addr, node in bucket.all_nodes.iteritems():
+                for _, node in bucket.all_nodes.iteritems():
                     loc.add_node(node.addr, node.nid)
         return loc
 

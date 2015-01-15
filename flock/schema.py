@@ -1,13 +1,15 @@
 #!/usr/bin/python
 # pylint: disable=missing-docstring
 # pylint: disable=bad-continuation
+# pylint: disable=too-many-arguments
 
-import record
 import logging
 import traceback
-import struct 
+import struct
 import simplejson as json
 import re
+
+from flock import record
 
 logger = logging.getLogger('schema') # pylint: disable=invalid-name
 
@@ -126,6 +128,8 @@ class Schema(object):
                 raise ValueError('Not a json')
             # Decode it
             obj = json.loads(body)
+            # TODO: Why is this pylint disable needed?
+            # pylint: disable=no-member
 
             # Grab the table special variable and make sure it's in schema
             table_name = obj['_table']
@@ -154,8 +158,7 @@ class Schema(object):
 
             # Run it
             cur.execute(stmt, obj.values())
-        except:
+        except: # pylint: disable=bare-except
             logger.debug("%s", traceback.format_exc())
             # If it fails, no big...
-            pass
 

@@ -2,6 +2,7 @@
 # pylint: disable=missing-docstring
 # pylint: disable=bad-continuation
 # pylint: disable=too-many-instance-attributes
+# pylint: disable=too-many-arguments
 
 import sqlite3
 import time
@@ -12,8 +13,8 @@ import hashlib
 from Crypto.PublicKey import RSA
 from Crypto.Signature import PKCS1_PSS
 
-import record
-import schema
+from flock import record
+from flock import schema
 
 RECORD_OVERHEAD = 100
 SCHEMA_HID = hashlib.sha256('_schema').digest()
@@ -84,18 +85,21 @@ class SyncStore(object):
             self.schema = schema.Schema(sjson)
 
     def __authorize(self, atype, arg1, arg2, table, src):
+        _ = (arg1, arg2, table, src)
         if not self.be_safe:
             return sqlite3.SQLITE_OK
+        # NOTE: Function and Recursive are not in sqlite3 package
+        # Are they needed?
         if (atype == sqlite3.SQLITE_ANALYZE or
             atype == sqlite3.SQLITE_READ or
             atype == sqlite3.SQLITE_OK or
-            atype == sqlite3.SQLITE_SELECT or
-            atype == sqlite3.SQLITE_FUNCTION or
-            atype == sqlite3.SQLITE_RECURSIVE):
+            atype == sqlite3.SQLITE_SELECT):
             return sqlite3.SQLITE_OK
         return sqlite3.SQLITE_DENY
 
     def __shrink(self):
+        # TODO: This needs to remove projected records
+        # Also, should split WT + SIGNED max sizes
         while self.cur_size > self.max_size:
             self.cur.execute(
                 "SELECT seq, 100 + length(data) FROM _records " +
@@ -180,7 +184,8 @@ class SyncStore(object):
         if nid is not None:
             self.cur.execute("UPDATE _peers SET busy = 0 WHERE nid = ?", (buffer(nid),))
         if addr is not None:
-            self.cur.execute("UPDATE _ips SET busy = 0, wtime = dtime + ? WHERE ip = ? AND port = ?",
+            self.cur.execute(
+                "UPDATE _ips SET busy = 0, wtime = dtime + ? WHERE ip = ? AND port = ?",
                 (time.time(), addr[0], addr[1]))
 
     def on_seq_update(self, nid, seq):
@@ -222,7 +227,8 @@ class SyncStore(object):
         self.schema = schema.Schema(sjson)
         self.schema.install(self.cur)
         for row in self.cur.execute(
-            "SELECT hid, summary, data, score FROM _records WHERE rtype = ?", (record.RT_WORKTOKEN,)):
+            "SELECT hid, summary, data, score FROM _records WHERE rtype = ?",
+                (record.RT_WORKTOKEN,)):
             (hid, summary, data, score) = row
             self.schema.insert_record(self.cur, hid, summary, data, score)
 
@@ -295,9 +301,9 @@ class SyncStore(object):
             self.cur.execute(query, params)
             results = self.cur.fetchall()
             self.be_safe = False
-        except Exception as e:
+        except Exception as exc:
             self.be_safe = False
-            raise e
+            raise exc
         return results
 
 class TestSyncStore(unittest.TestCase):

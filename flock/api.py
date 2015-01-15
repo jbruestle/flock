@@ -4,9 +4,10 @@
 import hashlib
 import logging
 
-import record
-from http import HttpException
 import simplejson as json
+
+from flock.http import HttpException
+from flock import record
 
 logger = logging.getLogger('api') # pylint: disable=invalid-name
 
