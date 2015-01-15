@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Example App</title>
+<script type="text/javascript" src="jquery-2.1.3.min.js"></script>
+</head>
+<body>
+<script type="text/javascript">
+$(document).ready(function(){
+    setTimeout(updateLog, 1000);
+    $("#send_mesg").click(function(){
+        $.ajax({
+            type: "POST",
+            url: "add_record",
+            data: JSON.stringify({
+                _table: "messages",
+                message: $("#to_send").val()
+            }),
+	    contentType: "application/json",
+            success: function(resp) {},
+	    error: function(resp) {}
+        });
+    });
+});
+function updateLog() {
+    $.ajax({
+        type: "POST",
+        url: "query",
+        data: JSON.stringify({
+            query: "SELECT message FROM messages ORDER BY timestamp DESC LIMIT 20"
+	}),
+	contentType: "application/json",
+        success: function(resp) {
+		$("#msgid").html(JSON.stringify(resp.results));
+		setTimeout(updateLog, 1000);
+	},
+	error: function(resp) {
+		$("#msgid").html("Whoops, can't get messages") 
+		setTimeout(updateLog, 1000);
+	}
+    });
+}
+</script>
+
+<p> 
+This is a test app.  All it does is display the top 20 messages sent by anyone recently, with
+the ability to add your own message to the bottom.
+In that regard, you might think of it as a primitive chat room.  The html is really the worst,
+since I'm a terrible web dev, but hey, it's simple.
+</p>
+
+<p>Put message to send here: </p>
+<input type="text" id="to_send", name="message" required="required" />
+<input type="button" id="send_mesg" value="Go" />
+
+<div id="msgid">
+</div>
+
+<p>My first paragraph.</p>
+
+</body>
+</html>
+

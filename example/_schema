@@ -1,0 +1,10 @@
+{
+    "schema" : {
+        "messages" : {
+            "message" : "text"
+        }
+    },
+    "indexes" : [
+        ["messages", "timestamp"]
+    ]
+}
