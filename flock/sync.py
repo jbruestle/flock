@@ -200,7 +200,7 @@ class SyncServerConn(SyncPeerConn):
         self.store.connections += 1
         if self.store.connections > MAX_PEERS:
             raise ValueError('Too many connections')
-        logger.info("Incoming connection from %s tid: %s, connections = %d",
+        logger.debug("Incoming connection from %s tid: %s, connections = %d",
             self.peer, tid.encode('hex'), self.store.connections)
         self.start()
 
@@ -255,7 +255,7 @@ class SyncPeer(asyncore.dispatcher):
         if pair is None:
             return
         (sock, addr) = pair # pylint: disable=unpacking-non-sequence
-        logger.info("Incoming connection from %s", addr)
+        logger.debug("Incoming connection from %s", addr)
         self.connections.append(SyncServerConn(self, sock))
 
 class TestSync(unittest.TestCase):
