@@ -170,9 +170,14 @@ def setup_network(cfg):
     if ipv4.is_private:
         # Yup, let's try upnp first
         eport = cfg.get('goal_ext_port', 58892)
-        upnp_res = setup_upnp(local, eport)
+        upnp_res = None
+        try:
+            upnp_res = setup_upnp(local, eport)
+        except:
+            pass
         if upnp_res:
             return UPNPConfig(sock, local, upnp_res)
+            
         # TODO: Try NatPMP
         # Just give up and use a local setup
         return BaseConfig(sock, None, None)
