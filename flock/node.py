@@ -286,7 +286,7 @@ class TestNodes(unittest.TestCase):
             "query" : "SELECT bar FROM test_table WHERE foo = ?",
             "params" : [20]
         })
-        print resp
+        logger.debug("Send resp: %s", resp)
         self.assertTrue(resp['results'][0][0] == 'world')
 
 
