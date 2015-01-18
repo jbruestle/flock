@@ -23,7 +23,7 @@ POTENTIAL_NODES = 20
 LOC_PEERS = 1000
 GOOD_RETRY_MIN = 10*60
 GOOD_RETRY_SLOP = 5*60
-SEND_RATE = .05
+SEND_RATE = 0.05
 
 class DhtRpc(asyncore.dispatcher):
     def __init__(self, dht, asm, port=6881):
@@ -35,6 +35,9 @@ class DhtRpc(asyncore.dispatcher):
         self.tid = 0
         self.pending = {}
         self.handlers = {}
+
+    def writable(self):
+        return False
 
     # pylint: disable=too-many-arguments
     def send_request(self, addr, rtype, args, on_succ, on_fail):
