@@ -4,7 +4,6 @@
 # pylint: disable=too-many-instance-attributes
 # pylint: disable=too-many-arguments
 
-import sqlite3
 import time
 import unittest
 import logging
@@ -15,6 +14,7 @@ from Crypto.Signature import PKCS1_PSS
 
 from flock import record
 from flock import schema
+from flock import dbconn 
 
 RECORD_OVERHEAD = 100
 DEFAULT_APP_SIZE = 100*1024*1024
@@ -58,10 +58,7 @@ class SyncStore(object):
     def __init__(self, tid, dbfile, max_size):
         self.tid = tid
         self.max_size = max_size
-        self.con = sqlite3.connect(dbfile)
-        self.con.set_authorizer(self.__authorize)
-        self.be_safe = False
-        self.cur = self.con.cursor()
+        self.cur = dbconn.DbConn(dbfile)
         self.cur.executescript(SyncStore.internal_sql)
         self.cur.execute(
             "SELECT ifnull(sum(? + length(data)),0) FROM _records", (RECORD_OVERHEAD,))
@@ -84,19 +81,6 @@ class SyncStore(object):
         (ctype, sjson) = self.get_data(record.RT_SIGNED, SCHEMA_HID)
         if ctype == 'application/json':
             self.schema = schema.Schema(sjson)
-
-    def __authorize(self, atype, arg1, arg2, table, src):
-        _ = (arg1, arg2, table, src)
-        if not self.be_safe:
-            return sqlite3.SQLITE_OK
-        # NOTE: Function and Recursive are not in sqlite3 package
-        # Are they needed?
-        if (atype == sqlite3.SQLITE_ANALYZE or
-            atype == sqlite3.SQLITE_READ or
-            atype == sqlite3.SQLITE_OK or
-            atype == sqlite3.SQLITE_SELECT):
-            return sqlite3.SQLITE_OK
-        return sqlite3.SQLITE_DENY
 
     def __shrink(self):
         # TODO: This needs to remove projected records
@@ -298,10 +282,9 @@ class SyncStore(object):
         return row[0]
 
     def run_query(self, query, params):
-        self.con.commit()
-        self.be_safe = True
+        self.cur.commit()
         try:
-            self.cur.execute(query, params)
+            self.cur.execute_safe(query, params)
             results = self.cur.fetchall()
             self.be_safe = False
         except Exception as exc:

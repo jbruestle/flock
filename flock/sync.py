@@ -240,7 +240,7 @@ class SyncPeer(asyncore.dispatcher):
             # TODO: This is an ineffient way to do this
             conn.fill_queue()
         for tid, sstore in self.stores.iteritems():
-            sstore.con.commit()
+            sstore.cur.commit()
         for tid, sstore in self.stores.iteritems():
             if sstore.connections >= GOAL_PEERS:
                 return
