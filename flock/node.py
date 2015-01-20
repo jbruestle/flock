@@ -18,6 +18,7 @@ import threading
 import simplejson as json
 import time
 
+from flock import dbconn 
 from flock import dht
 from flock import nat
 from flock import async
@@ -51,7 +52,8 @@ class Node(object):
             except Exception: # pylint: disable=broad-except
                 continue
             # TODO: Max size?
-            nstore = store.SyncStore(tid, os.path.join(self.store_dir, bname), store.DEFAULT_APP_SIZE)
+            db = dbconn.DbConn(os.path.join(self.store_dir, bname))
+            nstore = store.SyncStore(tid, db, store.DEFAULT_APP_SIZE)
             self.stores[tid] = nstore
 
     def __setup_dht(self):
@@ -114,7 +116,8 @@ class Node(object):
         hid = hashlib.sha256(encoded).digest()
         tid = hid[0:20]
         store_path = os.path.join(self.store_dir, tid.encode('hex'))
-        the_store = store.SyncStore(tid, store_path, max_size)
+        db = dbconn.DbConn(store_path)
+        the_store = store.SyncStore(tid, db, max_size)
         the_store.set_priv_key(priv_key)
         self.stores[tid] = the_store
         if self.dht is not None:
@@ -124,7 +127,8 @@ class Node(object):
 
     def join_app(self, tid, max_size):
         store_path = os.path.join(self.store_dir, tid.encode('hex'))
-        the_store = store.SyncStore(tid, store_path, max_size)
+        db = dbconn.DbConn(store_path)
+        the_store = store.SyncStore(tid, db, max_size)
         self.stores[tid] = the_store
         if self.dht is not None:
             self.dht.add_location(tid, self.net_conn.ext_port,

@@ -55,27 +55,27 @@ class SyncStore(object):
     CREATE INDEX IF NOT EXISTS _records_score ON _records (score);
     '''
 
-    def __init__(self, tid, dbfile, max_size):
+    def __init__(self, tid, db, max_size):
         self.tid = tid
+        self.db = db
         self.max_size = max_size
-        self.cur = dbconn.DbConn(dbfile)
-        self.cur.executescript(SyncStore.internal_sql)
-        self.cur.execute(
+        self.db.executescript(SyncStore.internal_sql)
+        self.db.execute(
             "SELECT ifnull(sum(? + length(data)),0) FROM _records", (RECORD_OVERHEAD,))
-        self.cur_size = self.cur.fetchone()[0]
+        self.db_size = self.db.fetchone()[0]
         self.verify = None
-        self.cur.execute("SELECT data FROM _records WHERE rtype = ? LIMIT 1", (record.RT_PUBKEY,))
-        row = self.cur.fetchone()
+        self.db.execute("SELECT data FROM _records WHERE rtype = ? LIMIT 1", (record.RT_PUBKEY,))
+        row = self.db.fetchone()
         if row is not None:
             self.__set_pubkey(row[0])
         self.signer = None
-        self.cur.execute("SELECT data FROM _singletons WHERE key = 'priv_key'")
-        row = self.cur.fetchone()
+        self.db.execute("SELECT data FROM _singletons WHERE key = 'priv_key'")
+        row = self.db.fetchone()
         if row is not None:
             priv_key = RSA.importKey(row[0], 'DER')
             self.signer = PKCS1_PSS.new(priv_key)
-        self.cur.execute("UPDATE _ips SET busy = 0")
-        self.cur.execute("UPDATE _peers SET busy = 0")
+        self.db.execute("UPDATE _ips SET busy = 0")
+        self.db.execute("UPDATE _peers SET busy = 0")
         self.connections = 0
         self.schema = None
         (ctype, sjson) = self.get_data(record.RT_SIGNED, SCHEMA_HID)
@@ -85,13 +85,13 @@ class SyncStore(object):
     def __shrink(self):
         # TODO: This needs to remove projected records
         # Also, should split WT + SIGNED max sizes
-        while self.cur_size > self.max_size:
-            self.cur.execute(
+        while self.db_size > self.max_size:
+            self.db.execute(
                 "SELECT seq, 100 + length(data) FROM _records " +
                 "ORDER BY score ASC LIMIT 1")
-            (seq, size) = self.cur.fetchone()
-            self.cur_size -= size
-            self.cur.execute("DELETE FROM _records WHERE seq = ?", (seq,))
+            (seq, size) = self.db.fetchone()
+            self.db_size -= size
+            self.db.execute("DELETE FROM _records WHERE seq = ?", (seq,))
 
     def __set_pubkey(self, data):
         pub_key = RSA.importKey(data, 'DER')
@@ -100,34 +100,34 @@ class SyncStore(object):
     def set_priv_key(self, priv_key):
         self.signer = PKCS1_PSS.new(priv_key)
         pub_key = priv_key.publickey()
-        self.cur.execute("INSERT INTO _singletons (key, data) VALUES ('priv_key', ?)",
+        self.db.execute("INSERT INTO _singletons (key, data) VALUES ('priv_key', ?)",
             (buffer(priv_key.exportKey('PEM')),))
         (hid, summary, body) = record.make_pubkey_record(pub_key)
         self.on_record(record.RT_PUBKEY, hid, summary, body)
 
     def on_add_peer(self, addr):
-        self.cur.execute(
+        self.db.execute(
             "INSERT OR IGNORE INTO _ips "
             "(ip, port, atime, ctime, dtime, wtime, busy) "
             "VALUES (?, ?, ?, NULL, 1, 0, 0)",
             (addr[0], addr[1], int(time.time())))
 
     def find_peer(self):
-        self.cur.execute(
+        self.db.execute(
             "DELETE FROM _ips where wtime > ?", (time.time() + 15*60,))
-        self.cur.execute(
+        self.db.execute(
             "SELECT ip, port, dtime FROM _ips " +
             "WHERE busy = 0 AND wtime < ? ORDER BY " +
             "IFNULL(ctime, 0) DESC, atime DESC LIMIT 1",
             (time.time(),))
-        row = self.cur.fetchone()
+        row = self.db.fetchone()
         if row == None:
             logger.debug("Finding peers, no result")
             return None
         (ipaddr, port, dtime) = row
         logger.debug("Finding _peers: r = %s, dtime = %s", (ipaddr, port), dtime)
         dtime *= 2
-        self.cur.execute("UPDATE _ips SET busy = 1, dtime = ? WHERE ip = ? AND port = ?",
+        self.db.execute("UPDATE _ips SET busy = 1, dtime = ? WHERE ip = ? AND port = ?",
             (dtime, ipaddr, port))
         self.connections += 1
         logger.debug("Adding find peer, Connections = %d", self.connections)
@@ -135,24 +135,24 @@ class SyncStore(object):
 
     def on_connect(self, addr, nid, outbound):
         logger.debug("on_connect, addr = %s, nid = %s", addr, nid.encode('hex'))
-        self.cur.execute("SELECT busy, seq from _peers WHERE nid = ?", (buffer(nid),))
-        row = self.cur.fetchone()
+        self.db.execute("SELECT busy, seq from _peers WHERE nid = ?", (buffer(nid),))
+        row = self.db.fetchone()
         if row is not None and row[0] == 1:
             # Busy case, simply return failue
             return None
         seq = 0
         if row is None:
-            self.cur.execute("INSERT INTO _peers (nid, busy, seq) VALUES (?, ?, ?)",
+            self.db.execute("INSERT INTO _peers (nid, busy, seq) VALUES (?, ?, ?)",
                 (buffer(nid), 1, seq))
         else:
-            self.cur.execute("UPDATE _peers SET busy = 1 WHERE nid = ?", (buffer(nid),))
+            self.db.execute("UPDATE _peers SET busy = 1 WHERE nid = ?", (buffer(nid),))
             seq = row[0]
         
         logger.info("Add connection: remote = %s, outbound = %s, tid = %s, nid = %s",
             addr, outbound, self.tid.encode('hex'), nid.encode('hex'))
 
         if outbound:
-            self.cur.execute(
+            self.db.execute(
                 "UPDATE _ips SET ctime = ?, dtime = 1, wtime = 0 " +
                 "WHERE ip = ? AND port = ?",
                 (int(time.time()), addr[0], addr[1]))
@@ -167,23 +167,23 @@ class SyncStore(object):
         logger.debug("on_disconnect, addr = %s, nid = %s", addr, nstr)
         logger.debug("Connections = %d", self.connections)
         if nid is not None:
-            self.cur.execute("UPDATE _peers SET busy = 0 WHERE nid = ?", (buffer(nid),))
+            self.db.execute("UPDATE _peers SET busy = 0 WHERE nid = ?", (buffer(nid),))
             logger.info("Drop connection: tid = %s, nid = %s",
                 self.tid.encode('hex'), nid.encode('hex'))
         if addr is not None:
-            self.cur.execute(
+            self.db.execute(
                 "UPDATE _ips SET busy = 0, wtime = dtime + ? WHERE ip = ? AND port = ?",
                 (time.time(), addr[0], addr[1]))
 
     def on_seq_update(self, nid, seq):
-        self.cur.execute("UPDATE _peers SET seq = ? WHERE nid = ?", (buffer(nid), seq))
+        self.db.execute("UPDATE _peers SET seq = ? WHERE nid = ?", (buffer(nid), seq))
 
     def on_summary(self, rtype, hid, summary):
         # Check for existing records
-        self.cur.execute(
+        self.db.execute(
             "SELECT score, data FROM _records "
             "WHERE rtype = ? AND hid = ?", (rtype, buffer(hid)))
-        row = self.cur.fetchone()
+        row = self.db.fetchone()
         # If no existing entry, return true
         if row == None:
             return True
@@ -198,7 +198,7 @@ class SyncStore(object):
             return False
         # If it's a WT record, just update the summary
         if rtype == record.RT_WORKTOKEN:
-            self.cur.execute(
+            self.db.execute(
                 "REPLACE INTO _records " +
                 "(rtype, hid, score, data, score) " +
                 "VALUES (?, ?, ?, ?, ?)",
@@ -212,12 +212,12 @@ class SyncStore(object):
         if ctype != 'application/json':
             return
         self.schema = schema.Schema(sjson)
-        self.schema.install(self.cur)
-        for row in self.cur.execute(
+        self.schema.install(self.db)
+        for row in self.db.execute(
             "SELECT hid, summary, data, score FROM _records WHERE rtype = ?",
                 (record.RT_WORKTOKEN,)):
             (hid, summary, data, score) = row
-            self.schema.insert_record(self.cur, hid, summary, data, score)
+            self.schema.insert_record(self.db, hid, summary, data, score)
 
     def on_record(self, rtype, hid, summary, data):
         # Validate + Score
@@ -226,26 +226,26 @@ class SyncStore(object):
             return False
         score = record.score_record(rtype, hid, summary)
         # Delete any existing version with lower score
-        self.cur.execute(
+        self.db.execute(
             "DELETE FROM _records " +
             "WHERE rtype = ? AND hid = ? AND score < ?",
             (rtype, buffer(hid), score))
-        if self.cur.rowcount > 0:
-            self.cur_size -= 100 + len(data)
+        if self.db.rowcount > 0:
+            self.db_size -= 100 + len(data)
             if rtype == record.RT_SIGNED and hid == SCHEMA_HID and self.schema is not None:
-                self.schema.uninstall(self.cur)
+                self.schema.uninstall(self.db)
         # Insert new row if not already there
-        self.cur.execute(
+        self.db.execute(
             "INSERT OR IGNORE INTO _records " +
             "(rtype, hid, summary, data, score) " +
             "VALUES (?, ?, ?, ?, ?)",
             (rtype, buffer(hid), buffer(summary), buffer(data), score))
-        if self.cur.rowcount > 0:
-            self.cur_size += 100 + len(data)
+        if self.db.rowcount > 0:
+            self.db_size += 100 + len(data)
             if rtype == record.RT_SIGNED and hid == SCHEMA_HID:
                 self.__new_schema()
             if rtype == record.RT_WORKTOKEN and self.schema is not None:
-                self.schema.insert_record(self.cur, hid, summary, data, score)
+                self.schema.insert_record(self.db, hid, summary, data, score)
         # Shrink as needed
         self.__shrink()
         # Maybe found a pubkey
@@ -255,37 +255,37 @@ class SyncStore(object):
         return True
 
     def get_summary(self, seq):
-        self.cur.execute(
+        self.db.execute(
             "SELECT seq, rtype, hid, summary " +
             "FROM _records WHERE seq > ? " +
             "LIMIT 1", (seq,))
-        row = self.cur.fetchone()
+        row = self.db.fetchone()
         if row is None:
             return None, None, None, None
         (rseq, rtype, hid, summary) = row
         return (rseq, rtype, str(hid), str(summary))
 
     def get_data(self, rtype, hid):
-        self.cur.execute("SELECT data FROM _records WHERE rtype = ? AND hid = ?",
+        self.db.execute("SELECT data FROM _records WHERE rtype = ? AND hid = ?",
             (rtype, buffer(hid)))
-        row = self.cur.fetchone()
+        row = self.db.fetchone()
         if row is None:
             return None, None
         return record.get_record_content(rtype, str(row[0]))
 
     def get_raw_data(self, rtype, hid):
-        self.cur.execute("SELECT data FROM _records WHERE rtype = ? AND hid = ?",
+        self.db.execute("SELECT data FROM _records WHERE rtype = ? AND hid = ?",
             (rtype, buffer(hid)))
-        row = self.cur.fetchone()
+        row = self.db.fetchone()
         if row is None:
             return None
         return row[0]
 
     def run_query(self, query, params):
-        self.cur.commit()
+        self.db.commit()
         try:
-            self.cur.execute_safe(query, params)
-            results = self.cur.fetchall()
+            self.db.execute_safe(query, params)
+            results = self.db.fetchall()
             self.be_safe = False
         except Exception as exc:
             self.be_safe = False
@@ -297,7 +297,8 @@ class TestSyncStore(unittest.TestCase):
     def test_ordered(self):
         # Make a SyncStore that holds 20 objects
         tid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
-        store = SyncStore(tid, ":memory:", 21 * (len('text/plain') + RECORD_OVERHEAD))
+        db = dbconn.DbConn(":memory:")
+        store = SyncStore(tid, db, 21 * (len('text/plain') + RECORD_OVERHEAD))
         recs = []
         # Make 30 random entries and insert them
         for i in range(30):
@@ -316,7 +317,8 @@ class TestSyncStore(unittest.TestCase):
     def test_update(self):
         # Make a SyncStore that holds 20 objects
         tid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
-        store = SyncStore(tid, ":memory:", 21 * (len('text/plain') + RECORD_OVERHEAD))
+        db = dbconn.DbConn(":memory:")
+        store = SyncStore(tid, db, 21 * (len('text/plain') + RECORD_OVERHEAD))
         recs = []
         # Make 20 random entries and insert them
         for i in range(20):
@@ -344,7 +346,8 @@ class TestSyncStore(unittest.TestCase):
     def test_get_summary(self):
         # Make a SyncStore that holds 20 objects
         tid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
-        store = SyncStore(tid, ":memory:", 21 * (len('text/plain') + RECORD_OVERHEAD))
+        db = dbconn.DbConn(":memory:")
+        store = SyncStore(tid, db, 21 * (len('text/plain') + RECORD_OVERHEAD))
         recs = []
         # Make 20 random entries and insert them
         for i in range(20):

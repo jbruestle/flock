@@ -12,6 +12,7 @@ import unittest
 import logging
 import random
 
+from flock import dbconn
 from flock import store
 from flock import async
 from flock import record
@@ -240,7 +241,7 @@ class SyncPeer(asyncore.dispatcher):
             # TODO: This is an ineffient way to do this
             conn.fill_queue()
         for tid, sstore in self.stores.iteritems():
-            sstore.cur.commit()
+            sstore.db.commit()
         for tid, sstore in self.stores.iteritems():
             if sstore.connections >= GOAL_PEERS:
                 return
@@ -268,13 +269,15 @@ class TestSync(unittest.TestCase):
     def test_simple(self):
         # Make room for 40 cakes
         tid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
-        ss1 = store.SyncStore(tid, ":memory:", 21 * (len('text/plain') + store.RECORD_OVERHEAD))
+        db1 = dbconn.DbConn(":memory:")
+        ss1 = store.SyncStore(tid, db1, 21 * (len('text/plain') + store.RECORD_OVERHEAD))
         # Insert some records
         all_data = []
         for i in range(20):
             TestSync.add_data(all_data, ss1, i)
         # Make something to sync it to
-        ss2 = store.SyncStore(tid, ":memory:", 21 * (len('text/plain') + store.RECORD_OVERHEAD))
+        db2 = dbconn.DbConn(":memory:")
+        ss2 = store.SyncStore(tid, db2, 21 * (len('text/plain') + store.RECORD_OVERHEAD))
         # Make some fake socket action
         for i in range(20, 40):
             TestSync.add_data(all_data, ss2, i)
@@ -305,8 +308,10 @@ class TestSync(unittest.TestCase):
     def test_node(self):
         tid = 'aaaabbbbcccceeeeffff'
         asm = async.AsyncMgr()
-        ss1 = store.SyncStore(tid, ":memory:", 41 * (len('text/plain') + store.RECORD_OVERHEAD))
-        ss2 = store.SyncStore(tid, ":memory:", 41 * (len('text/plain') + store.RECORD_OVERHEAD))
+        db1 = dbconn.DbConn(":memory:")
+        db2 = dbconn.DbConn(":memory:")
+        ss1 = store.SyncStore(tid, db1, 41 * (len('text/plain') + store.RECORD_OVERHEAD))
+        ss2 = store.SyncStore(tid, db2, 41 * (len('text/plain') + store.RECORD_OVERHEAD))
         node1 = TestSync.make_node(asm, tid, ss1, 6000)
         _ = TestSync.make_node(asm, tid, ss2, 6001)
         all_data = []
