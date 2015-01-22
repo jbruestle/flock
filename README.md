@@ -28,7 +28,7 @@ flock -d <storage_dir>
 
 `<storage_dir>` is a path to where flock should store files that are part of the various apps your use or create.  
 
-Once that is done, you need to join one or more 'apps'.  If you want to develp a new app, see the 'developing apps' section.  To join an app, you need to know the app's ID number.  Right now, the author is running a 'test-app' with the ID of `5a6961ca9a2d774b2a53e7f4b93d285cba586ac3`.  We plan to make a web interface for finding and joining new apps built in to flock, but for now, you need to use curl.
+Once that is done, you need to join one or more 'apps'.  If you want to develp a new app, see the 'developing apps' section.  To join an app, you need to know the app's ID number.  Right now, the author is running a 'test-app' with the ID of `ecd6ba0918ba60720794cac2a3c9b4190b37d9c5`.  We plan to make a web interface for finding and joining new apps built in to flock, but for now, you need to use curl.
 
 To join an app run:
 
@@ -39,7 +39,7 @@ curl -v -X POST --header "Content-Type: application/json" localhost:8000/<ID>/jo
 Where `<ID>` is replaced by the ID of the app, for example:
 
 ```
-curl -v -X POST --header "Content-Type: application/json" localhost:8000/5a6961ca9a2d774b2a53e7f4b93d285cba586ac3/join_app -d '{}'
+curl -v -X POST --header "Content-Type: application/json" localhost:8000/ecd6ba0918ba60720794cac2a3c9b4190b37d9c5/join_app -d '{}'
 ```
 
 Yes, that's really ugly, don't worry, we'll fix it soon.  Once you've joined an app, you go to it by opening a browser and going to:
