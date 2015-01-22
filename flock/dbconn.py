@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# pylint: disable=missing-docstring
+# pylint: disable=bad-continuation
 
 import sqlite3
 
@@ -8,11 +11,11 @@ class DbConn(object):
         self.be_safe = False
         self.cur = self.con.cursor()
 
-    def execute(self, query, params = ()):
+    def execute(self, query, params=()):
         self.cur.execute(query, params)
         return self.cur
 
-    def execute_safe(self, query, params = ()):
+    def execute_safe(self, query, params=()):
         self.be_safe = True
         try:
             self.cur.execute(query, params)
@@ -40,7 +43,7 @@ class DbConn(object):
     def lastrowid(self):
         return self.cur.lastrowid
 
-    def __authorize(self, atype, arg1, arg2, table, src):
+    def __authorize(self, atype, arg1, arg2, table, src): # pylint: disable=too-many-arguments
         _ = (arg1, arg2, table, src)
         if not self.be_safe:
             return sqlite3.SQLITE_OK

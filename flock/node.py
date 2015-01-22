@@ -19,12 +19,10 @@ import threading
 import simplejson as json
 import time
 
-from flock import dbconn 
+from flock import dbconn
 from flock import dht
 from flock import nat
 from flock import async
-from flock import sync
-from flock import store
 from flock import http
 from flock import api
 from flock import syncgroup
@@ -53,9 +51,8 @@ class Node(asyncore.dispatcher):
                 tid = bname.decode('hex')
             except Exception: # pylint: disable=broad-except
                 continue
-            # TODO: Max size
-            db = dbconn.DbConn(os.path.join(self.store_dir, bname))
-            self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, tid, self.nid, db)
+            dbc = dbconn.DbConn(os.path.join(self.store_dir, bname))
+            self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, tid, self.nid, dbc)
 
     def __setup_dht(self):
         # Create DHT object
@@ -86,7 +83,7 @@ class Node(asyncore.dispatcher):
         # Make asm
         self.asm = async.AsyncMgr()
 
-        # Load nid + syncgroups 
+        # Load nid + syncgroups
         self.__load_nid()
         self.__load_syncgroups()
 
@@ -106,7 +103,7 @@ class Node(asyncore.dispatcher):
             self.__setup_dht()
         else:
             self.dht = None
-   
+
         # Setup API goo
         self.api = api.Api(self)
         self.http = http.HttpServer(self.asm, self.api, self.cfg)
@@ -117,7 +114,7 @@ class Node(asyncore.dispatcher):
     def on_timer(self):
         self.asm.add_timer(time.time() + 1, self.on_timer)
         for _, group in self.syncgroups.iteritems():
-            group.db.commit()
+            group.dbc.commit()
             group.on_timer()
 
     def poke(self, tid):
@@ -128,7 +125,7 @@ class Node(asyncore.dispatcher):
         if pair is None:
             return
         (sock, addr) = pair # pylint: disable=unpacking-non-sequence
-        logger.debug("Incoming node connection, addr = %s", addr) 
+        logger.debug("Incoming node connection, addr = %s", addr)
         syncgroup.IncomingSync(self.asm, sock, lambda tid: self.syncgroups[tid])
 
     def on_peer(self, tid, addr):
@@ -145,26 +142,25 @@ class Node(asyncore.dispatcher):
             return None
         return self.syncgroups[tid].store
 
-    def create_app(self, max_size):
+    def create_app(self):
         priv_key = RSA.generate(2048)
         pub_key = priv_key.publickey()
         encoded = pub_key.exportKey('DER')
         hid = hashlib.sha256(encoded).digest()
         tid = hid[0:20]
         store_path = os.path.join(self.store_dir, tid.encode('hex'))
-        db = dbconn.DbConn(store_path)
-        self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, tid, self.nid, db)
+        dbc = dbconn.DbConn(store_path)
+        self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, tid, self.nid, dbc)
         self.syncgroups[tid].store.set_priv_key(priv_key)
         if self.dht is not None:
             self.dht.add_location(tid, self.net_conn.ext_port,
                 lambda addr: self.on_peer(tid, addr))
         return tid
 
-    def join_app(self, tid, max_size):
+    def join_app(self, tid):
         store_path = os.path.join(self.store_dir, tid.encode('hex'))
-        db = dbconn.DbConn(store_path)
-        the_store = store.SyncStore(tid, db, max_size)
-        self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, tid, self.nid, db)
+        dbc = dbconn.DbConn(store_path)
+        self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, tid, self.nid, dbc)
         if self.dht is not None:
             self.dht.add_location(tid, self.net_conn.ext_port,
                 lambda addr: self.on_peer(tid, addr))

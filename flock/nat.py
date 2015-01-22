@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # pylint: disable=missing-docstring
-# pylint: disable=too-many-instance-attributes
 # pylint: disable=too-few-public-methods
 
 import time
@@ -78,6 +77,7 @@ def setup_upnp(local, eport):
     return (upnp, port)
 
 class BaseConfig(object):
+    # pylint: disable=too-many-instance-attributes
     def __init__(self, sock, ext_ip, ext_port):
         # Set external variables
         self.sock = sock
@@ -173,11 +173,11 @@ def setup_network(cfg):
         upnp_res = None
         try:
             upnp_res = setup_upnp(local, eport)
-        except:
+        except: # pylint: disable=bare-except
             pass
         if upnp_res:
             return UPNPConfig(sock, local, upnp_res)
-            
+
         # TODO: Try NatPMP
         # Just give up and use a local setup
         return BaseConfig(sock, None, None)

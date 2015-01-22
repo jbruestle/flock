@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # pylint: disable=missing-docstring
-# pylint: disable=too-few-public-methods
 
 import asyncore
 import StringIO
@@ -26,6 +25,7 @@ class HttpException(Exception):
 # questionable, since it relies on implementation details, but good
 # enough for the time being
 class HttpRequest(BaseHTTPServer.BaseHTTPRequestHandler):
+    # pylint: disable=too-few-public-methods
     def __init__(self, request_text):
         # pylint: disable=super-init-not-called
         self.rfile = StringIO.StringIO(request_text)
@@ -38,6 +38,7 @@ class HttpRequest(BaseHTTPServer.BaseHTTPRequestHandler):
         self.error_message = message
 
 class HttpResponse(object):
+    # pylint: disable=too-few-public-methods
     def __init__(self, status, message):
         self.status = status
         self.message = message

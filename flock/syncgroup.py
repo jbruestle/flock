@@ -1,32 +1,36 @@
 #!/usr/bin/env python
+# pylint: disable=missing-docstring
+# pylint: disable=bad-continuation
+# pylint: disable=too-few-public-methods
 
 import asyncore
-import random 
-import time 
-import socket 
-import logging 
-import unittest 
+import random
+import time
+import socket
+import logging
+import unittest
 
-from flock import dbconn 
+from flock import dbconn
 from flock import async
-from flock import store 
+from flock import store
 from flock import sync
 
 logger = logging.getLogger('syncgroup') # pylint: disable=invalid-name
 
-NEG_TIMEOUT = 1.5 
-CONN_TIMEOUT = 3.0 
-NEG_HEADER_FMT = '!4s20s' # Magic number, remote NID 
-SEQ_HEADER_FMT = '!Q' # Magic number, remote NID 
+NEG_TIMEOUT = 1.5
+CONN_TIMEOUT = 3.0
+NEG_HEADER_FMT = '!4s20s' # Magic number, remote NID
+SEQ_HEADER_FMT = '!Q' # Magic number, remote NID
 
 GOAL_CONNECTIONS = 5
 MAX_CONNECTIONS = 10
 
 class SyncSetup(sync.SyncConnection):
-    def __init__(self, asm, sock, group, addr, timeout):
+    def __init__(self, asm, sock, group, addr, timeout): # pylint: disable=too-many-arguments
         sync.SyncConnection.__init__(self, asm, sock)
         self.group = group
         self.addr = addr
+        self.local_nid = None
         self.remote_nid = None
         self.timer = self.asm.add_timer(time.time() + timeout, self.on_timeout)
 
@@ -67,10 +71,10 @@ class SyncSetup(sync.SyncConnection):
         logger.debug("%d: Got seq header", id(self))
         self.asm.cancel(self.timer)
         self.timer = None
-        logger.info("%d: Sync established, Group: %s, remote: %s, nid: %s", 
-            id(self), self.group.tid.encode('hex'), self.getpeername(), self.remote_nid.encode('hex'))
+        logger.info("%d: Sync established, Group: %s, remote: %s, nid: %s", id(self),
+            self.group.tid.encode('hex'), self.getpeername(), self.remote_nid.encode('hex'))
         self.group.active[self.remote_nid] = self
-        self.start_sync(self.group.store, remote_seq, 
+        self.start_sync(self.group.store, remote_seq,
             lambda seq: self.group.update_seq(self.remote_nid, seq))
 
     def on_timeout(self):
@@ -79,7 +83,8 @@ class SyncSetup(sync.SyncConnection):
 
 class OutgoingSync(SyncSetup):
     def __init__(self, asm, group, addr):
-        logger.info("%d: Making outgoing connection from %s to %s", id(self), group.tid.encode('hex'), addr)
+        logger.info("%d: Making outgoing connection from %s to %s", id(self),
+            group.tid.encode('hex'), addr)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         SyncSetup.__init__(self, asm, sock, group, addr, CONN_TIMEOUT + NEG_TIMEOUT)
         self.group.connections += 1
@@ -96,7 +101,7 @@ class IncomingSync(SyncSetup):
         logger.debug("Receiving incoming connection from %s", sock.getpeername())
         SyncSetup.__init__(self, asm, sock, None, None, NEG_TIMEOUT)
         self.recv_buffer(20, self.on_tid)
-        
+
     def on_tid(self, tid):
         self.group = self.tid_to_group(tid)
         self.group.connections += 1
@@ -119,37 +124,37 @@ class SyncGroup(object):
         seq    INTEGER
     );
     '''
-    def __init__(self, asm, tid, nid, db):
+    def __init__(self, asm, tid, nid, dbc):
         self.asm = asm
         self.tid = tid
         self.nid = nid
-        self.db = db
-        self.db.executescript(SyncGroup.internal_sql)
-        self.store = store.SyncStore(tid, db)
+        self.dbc = dbc
+        self.dbc.executescript(SyncGroup.internal_sql)
+        self.store = store.SyncStore(tid, dbc)
         self.connections = 0
         self.active = {}
 
     def get_sync_seq(self, nid, addr):
         # Set 'last nid' on IP record if any
         if addr is not None:
-            self.db.execute(
+            self.dbc.execute(
                 "INSERT OR REPLACE INTO _ips "
                 "(ip, port, busy, wtime, ntime, nid) "
                 "VALUES (?, ?, 1, 2, ?, ?)",
                 (addr[0], addr[1], int(time.time()) + 2, buffer(nid)))
         # Check the stat of the nid
-        self.db.execute("SELECT busy, seq from _peers WHERE nid = ?", (buffer(nid),))
-        row = self.db.fetchone()
+        self.dbc.execute("SELECT busy, seq from _peers WHERE nid = ?", (buffer(nid),))
+        row = self.dbc.fetchone()
         if row is not None and row[0] == 1:
             # Busy case, simply fail
             raise ValueError("NID is busy")
         # Set result to busy, and return seq #
         if row is None:
-            self.db.execute("INSERT INTO _peers (nid, busy, seq) VALUES (?, 1, 0)",
+            self.dbc.execute("INSERT INTO _peers (nid, busy, seq) VALUES (?, 1, 0)",
                 (buffer(nid),))
             return 0
         else:
-            self.db.execute("UPDATE _peers SET busy = 1 WHERE nid = ?", (buffer(nid),))
+            self.dbc.execute("UPDATE _peers SET busy = 1 WHERE nid = ?", (buffer(nid),))
             return row[0]
 
     def on_timer(self):
@@ -157,49 +162,52 @@ class SyncGroup(object):
         if self.connections > GOAL_CONNECTIONS:
             return
         # TODO: What should I order by here?
-        self.db.execute("SELECT ip, port "
+        self.dbc.execute("SELECT ip, port "
             "FROM _ips LEFT OUTER JOIN _peers "
             "ON _peers.nid == _ips.nid "
             "WHERE ntime < ? AND _ips.busy = 0 AND IFNULL(_peers.busy, 0) == 0 "
             "LIMIT 1", (int(time.time()),))
-        row = self.db.fetchone()
+        row = self.dbc.fetchone()
         if row is None:
             return # No one to connect to
         addr = (row[0], row[1])
-        self.db.execute("UPDATE _ips SET busy = 1 WHERE ip = ? AND port = ?", (addr[0], addr[1]))
+        self.dbc.execute("UPDATE _ips SET busy = 1 WHERE ip = ? AND port = ?", (addr[0], addr[1]))
         OutgoingSync(self.asm, self, addr)
 
     def on_disconnect(self, nid, addr):
         self.connections -= 1
         if nid is not None:
-            self.db.execute("UPDATE _peers SET busy = 0 WHERE nid = ?", (buffer(nid),))
+            self.dbc.execute("UPDATE _peers SET busy = 0 WHERE nid = ?", (buffer(nid),))
             if nid in self.active:
                 del self.active[nid]
         if addr is not None:
-            self.db.execute("SELECT wtime, ntime FROM _ips WHERE ip = ? AND port = ?", (addr[0], addr[1]))
-            row = self.db.fetchone()
+            self.dbc.execute(
+                "SELECT wtime, ntime FROM _ips WHERE ip = ? AND port = ?",
+                (addr[0], addr[1]))
+            row = self.dbc.fetchone()
             if row is None:
                 return
             wtime = row[0]
             ntime = row[1]
             if nid is None:
-                # Failed to connect, 
+                # Failed to connect
                 wtime *= 2
             else:
                 wtime = 2
             ntime = time.time() + wtime
             if wtime > 10*60:
-                self.db.execute("DELETE FROM _ips WHERE ip = ? AND port = ?", (addr[0], addr[1]))
+                self.dbc.execute("DELETE FROM _ips WHERE ip = ? AND port = ?", (addr[0], addr[1]))
             else:
-                self.db.execute("UPDATE _ips SET busy = 0, wtime = ?, ntime = ? WHERE ip = ? AND port = ?",
+                self.dbc.execute(
+                    "UPDATE _ips SET busy = 0, wtime = ?, ntime = ? WHERE ip = ? AND port = ?",
                     (wtime, ntime, addr[0], addr[1]))
 
     def update_seq(self, nid, seq):
-        self.db.execute("UPDATE _peers SET seq = ? WHERE nid = ?", (seq, buffer(nid)))
+        self.dbc.execute("UPDATE _peers SET seq = ? WHERE nid = ?", (seq, buffer(nid)))
         self.poke()
 
     def add_peer(self, addr):
-        self.db.execute(
+        self.dbc.execute(
             "INSERT OR IGNORE INTO _ips "
             "(ip, port, busy, wtime, ntime, nid) "
             "VALUES (?, ?, 0, 1000, ?, NULL)",
@@ -214,8 +222,8 @@ class TestNode(asyncore.dispatcher):
         self.asm = asm
         self.nid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
         self.tid = tid
-        self.db = dbconn.DbConn(":memory:")
-        self.group = SyncGroup(asm, self.tid, self.nid, self.db)
+        self.dbc = dbconn.DbConn(":memory:")
+        self.group = SyncGroup(asm, self.tid, self.nid, self.dbc)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         local = ('', port)
@@ -235,11 +243,11 @@ class TestNode(asyncore.dispatcher):
         pair = self.accept()
         if pair is None:
             return
-        (sock, addr) = pair # pylint: disable=unpacking-non-sequence
+        (sock, _) = pair # pylint: disable=unpacking-non-sequence
         IncomingSync(self.asm, sock, self.tid_to_group)
 
     def tid_to_group(self, tid):
-        assert(tid == self.tid)
+        assert tid == self.tid
         return self.group
 
 class TestSync(unittest.TestCase):

@@ -3,8 +3,6 @@
 # pylint: disable=bad-continuation
 
 import collections
-import time
-import asyncore
 import socket
 import unittest
 import logging
@@ -29,7 +27,7 @@ class SyncConnection(async.Connection):
         self.await_data = collections.deque()
         self.max_outstanding = OUTSTANDING
         self.store = None
-        self.send_seq = None 
+        self.send_seq = None
         self.recv_seq = None
         self.on_seq_update = None
 
