@@ -92,20 +92,13 @@ class Api(object):
         raise HttpException(400, "Unknown action")
 
     def gact_create_app(self, obj):
-        max_size = self.__optional_int(obj, 'max_size', store.DEFAULT_APP_SIZE)
-        logger.debug("max_size = %d", max_size)
-        if max_size < 0 or max_size > 1*1024*1024*1024:
-            raise HttpException(400, "max_size out of range")
-        logger.info('create_app: max_size = %d', max_size)
-        tid = self.node.create_app(max_size)
+        logger.info('create_app')
+        tid = self.node.create_app()
         return {'success' : True, 'tid' : tid.encode('hex')}
 
     def tact_join_app(self, tid, obj):
-        max_size = self.__optional_int(obj, 'max_size', store.DEFAULT_APP_SIZE)
-        if max_size < 0 or max_size > 1*1024*1024*1024:
-            raise HttpException(400, "max_size out of range")
-        logger.info('join_app: tid = %s, max_size = %d', tid.encode('hex'), max_size)
-        self.node.join_app(tid, max_size)
+        logger.info('join_app: tid = %s', tid.encode('hex'))
+        self.node.join_app(tid)
         return {'success' : True}
 
     def tact_add_peer(self, tid, obj):

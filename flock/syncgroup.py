@@ -69,8 +69,9 @@ class SyncSetup(sync.SyncConnection):
 
     def on_seq_header(self, remote_seq):
         logger.debug("%d: Got seq header", id(self))
-        self.asm.cancel(self.timer)
-        self.timer = None
+        if self.timer is not None:
+            self.asm.cancel(self.timer)
+            self.timer = None
         logger.info("%d: Sync established, Group: %s, remote: %s, nid: %s", id(self),
             self.group.tid.encode('hex'), self.getpeername(), self.remote_nid.encode('hex'))
         self.group.active[self.remote_nid] = self
@@ -78,6 +79,7 @@ class SyncSetup(sync.SyncConnection):
             lambda seq: self.group.update_seq(self.remote_nid, seq))
 
     def on_timeout(self):
+        self.timer = None
         logger.debug("%d: Negotiation timeout", id(self))
         self.handle_close()
 
