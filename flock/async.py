@@ -58,9 +58,13 @@ class Connection(asynchat.async_chat):
         self.__term_callback = None
         self.__ibuffer = []
         self.__fmt = None
+        self.complain = True
 
     def handle_error(self):
-        logger.warning("%s: got error: %s", id(self), sys.exc_info()[1])
+        if self.complain:
+            logger.warning("%s: got error: %s", id(self), sys.exc_info()[1])
+        else:
+            logger.debug("%s: got error: %s", id(self), sys.exc_info()[1])
         logger.debug("%s", traceback.format_exc())
         self.close()
 

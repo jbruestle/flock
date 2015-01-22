@@ -90,7 +90,7 @@ class OutgoingSync(SyncSetup):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         SyncSetup.__init__(self, asm, sock, group, addr, CONN_TIMEOUT + NEG_TIMEOUT)
         self.group.connections += 1
-        logger.info("Connection = %d", self.group.connections)
+        logger.info("Connections = %d", self.group.connections)
         self.connect(addr)
 
     def handle_connect(self):
@@ -103,12 +103,14 @@ class IncomingSync(SyncSetup):
         self.tid_to_group = tid_to_group
         logger.debug("Receiving incoming connection from %s", sock.getpeername())
         SyncSetup.__init__(self, asm, sock, None, None, NEG_TIMEOUT)
+        self.complain = False
         self.recv_buffer(20, self.on_tid)
 
     def on_tid(self, tid):
         self.group = self.tid_to_group(tid)
         self.group.connections += 1
-        logger.info("Connection = %d", self.group.connections)
+        logger.info("Connections = %d", self.group.connections)
+        self.complain = True
         self.start_negotiate()
 
 class SyncGroup(object):
@@ -182,7 +184,7 @@ class SyncGroup(object):
 
     def on_disconnect(self, nid, addr):
         self.connections -= 1
-        logger.info("Connection = %d", self.connections)
+        logger.info("Connections = %d", self.connections)
         if nid is not None:
             self.dbc.execute("UPDATE _peers SET busy = 0 WHERE nid = ?", (buffer(nid),))
             if nid in self.active:
