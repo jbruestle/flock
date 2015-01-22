@@ -48,7 +48,7 @@ class HttpResponse(object):
 
 class HttpConnection(async.Connection):
     def __init__(self, sock, server):
-        async.Connection.__init__(self, sock, map=server.asm.async_map)
+        async.Connection.__init__(self, server.asm, sock)
         self.server = server
         self.recv_until("\r\n\r\n", self.on_header)
 

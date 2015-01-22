@@ -8,7 +8,7 @@ import bintrees
 import struct
 import logging
 import sys
-#import traceback
+import traceback
 
 logger = logging.getLogger('async') # pylint: disable=invalid-name
 
@@ -34,6 +34,8 @@ class AsyncMgr(object):
         while len(self.timers) > 0 and self.timers.min_key()[0] <= now:
             (_, callback) = self.timers.pop_min()
             callback()
+            if not self.running:
+                return
         wait = 60
         if len(self.timers) > 0:
             wait = min(wait, self.timers.min_key()[0] - now)
@@ -50,19 +52,20 @@ class AsyncMgr(object):
         self.running = False
 
 class Connection(asynchat.async_chat):
-    def __init__(self, sock, map=None): # pylint: disable=redefined-builtin
-        asynchat.async_chat.__init__(self, sock=sock, map=map)
+    def __init__(self, asm, sock):
+        self.asm = asm
+        asynchat.async_chat.__init__(self, sock=sock, map=asm.async_map)
         self.__term_callback = None
         self.__ibuffer = []
         self.__fmt = None
 
     def handle_error(self):
         logger.warning("%s: got error: %s", id(self), sys.exc_info()[1])
-        #logger.warning("%s", traceback.format_exc())
+        logger.debug("%s", traceback.format_exc())
         self.close()
 
     def handle_close(self):
-        logger.info("%s: Got a close", id(self))
+        logger.debug("%s: Got a close", id(self))
         self.close()
 
     def collect_incoming_data(self, data):

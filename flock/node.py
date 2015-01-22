@@ -4,6 +4,7 @@
 #pylint: disable=too-many-instance-attributes
 
 import os
+import asyncore
 import logging
 import hashlib
 import random
@@ -26,10 +27,11 @@ from flock import sync
 from flock import store
 from flock import http
 from flock import api
+from flock import syncgroup
 
 logger = logging.getLogger('http') # pylint: disable=invalid-name
 
-class Node(object):
+class Node(asyncore.dispatcher):
     def __load_nid(self):
         # Create/load nid
         nid_file = os.path.join(self.store_dir, 'nid')
@@ -42,8 +44,8 @@ class Node(object):
         if len(self.nid) != 20:
             raise ValueError('Invalid nid')
 
-    def __load_stores(self):
-        self.stores = {}
+    def __load_syncgroups(self):
+        self.syncgroups = {}
         for bname in os.listdir(self.store_dir):
             if len(bname) != 40:
                 continue
@@ -51,10 +53,9 @@ class Node(object):
                 tid = bname.decode('hex')
             except Exception: # pylint: disable=broad-except
                 continue
-            # TODO: Max size?
+            # TODO: Max size
             db = dbconn.DbConn(os.path.join(self.store_dir, bname))
-            nstore = store.SyncStore(tid, db, store.DEFAULT_APP_SIZE)
-            self.stores[tid] = nstore
+            self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, tid, self.nid, db)
 
     def __setup_dht(self):
         # Create DHT object
@@ -71,7 +72,7 @@ class Node(object):
             self.dht.bootstrap_node(addr)
 
         # Make a DHT location for each store
-        for tid, _ in self.stores.iteritems():
+        for tid, _ in self.syncgroups.iteritems():
             self.dht.add_location(tid, self.net_conn.ext_port,
                 lambda addr, tid=tid: self.on_peer(tid, addr))
 
@@ -82,9 +83,12 @@ class Node(object):
         if not os.path.exists(self.store_dir):
             os.makedirs(self.store_dir)
 
-        # Load nid + stores
+        # Make asm
+        self.asm = async.AsyncMgr()
+
+        # Load nid + syncgroups 
         self.__load_nid()
-        self.__load_stores()
+        self.__load_syncgroups()
 
         # Nat punch out
         self.net_conn = nat.setup_network(self.cfg)
@@ -93,21 +97,53 @@ class Node(object):
             # TODO: Is this really the right exception
             raise RuntimeError("Unable to find internet")
 
-        # Setup remaining systems
-        self.asm = async.AsyncMgr()
+        # Attach natted connection to myself
+        asyncore.dispatcher.__init__(self, sock=self.net_conn.sock, map=self.asm.async_map)
+        self.listen(5)
+
+        # Setup DHT is needed
         if self.cfg.get('use_dht', True):
             self.__setup_dht()
         else:
             self.dht = None
-        self.sync = sync.SyncPeer(self.asm, self.nid, self.stores, self.net_conn.sock)
+   
+        # Setup API goo
         self.api = api.Api(self)
         self.http = http.HttpServer(self.asm, self.api, self.cfg)
+
+        # Kick off self timer
+        self.on_timer()
+
+    def on_timer(self):
+        self.asm.add_timer(time.time() + 1, self.on_timer)
+        for _, group in self.syncgroups.iteritems():
+            group.db.commit()
+            group.on_timer()
+
+    def poke(self, tid):
+        self.syncgroups[tid].poke()
+
+    def handle_accept(self):
+        pair = self.accept()
+        if pair is None:
+            return
+        (sock, addr) = pair # pylint: disable=unpacking-non-sequence
+        logger.debug("Incoming node connection, addr = %s", addr) 
+        syncgroup.IncomingSync(self.asm, sock, lambda tid: self.syncgroups[tid])
 
     def on_peer(self, tid, addr):
         if addr[0] == self.net_conn.ext_ip and addr[1] == self.net_conn.ext_port:
             # Ignore self connections
             return
-        self.sync.add_peer(tid, addr)
+        if tid not in self.syncgroups:
+            # Ignore stuff I don't care about
+            return
+        self.syncgroups[tid].add_peer(addr)
+
+    def get_store(self, tid):
+        if tid not in self.syncgroups:
+            return None
+        return self.syncgroups[tid].store
 
     def create_app(self, max_size):
         priv_key = RSA.generate(2048)
@@ -117,9 +153,8 @@ class Node(object):
         tid = hid[0:20]
         store_path = os.path.join(self.store_dir, tid.encode('hex'))
         db = dbconn.DbConn(store_path)
-        the_store = store.SyncStore(tid, db, max_size)
-        the_store.set_priv_key(priv_key)
-        self.stores[tid] = the_store
+        self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, tid, self.nid, db)
+        self.syncgroups[tid].store.set_priv_key(priv_key)
         if self.dht is not None:
             self.dht.add_location(tid, self.net_conn.ext_port,
                 lambda addr: self.on_peer(tid, addr))
@@ -129,7 +164,7 @@ class Node(object):
         store_path = os.path.join(self.store_dir, tid.encode('hex'))
         db = dbconn.DbConn(store_path)
         the_store = store.SyncStore(tid, db, max_size)
-        self.stores[tid] = the_store
+        self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, tid, self.nid, db)
         if self.dht is not None:
             self.dht.add_location(tid, self.net_conn.ext_port,
                 lambda addr: self.on_peer(tid, addr))

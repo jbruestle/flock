@@ -18,9 +18,9 @@ class Api(object):
 
     def get(self, tid, key):
         logger.info('Got a GET: tid = %s, key = %s', tid.encode('hex'), key)
-        if tid not in self.node.stores:
+        the_store = self.node.get_store(tid)
+        if the_store is None:
             raise HttpException(404, "Not Found")
-        the_store = self.node.stores[tid]
         khash = hashlib.sha256(key).digest()
         (ctype, data) = the_store.get_data(record.RT_SIGNED, khash)
         if ctype == 'tombstone' and data == 'tombstone':
@@ -31,19 +31,21 @@ class Api(object):
 
     def put(self, tid, key, ctype, body):
         logger.info('Got a PUT: tid = %s, key = %s', tid.encode('hex'), key)
-        if tid not in self.node.stores:
+        the_store = self.node.get_store(tid)
+        if the_store is None:
             raise HttpException(404, "Not Found")
-        the_store = self.node.stores[tid]
         signer = the_store.signer
         if signer == None:
             raise HttpException(403, "Forbidden")
         (hid, summary, data) = record.make_signed_record(signer, key, ctype, body)
         if not the_store.on_record(record.RT_SIGNED, hid, summary, data):
             raise HttpException(500, "Unable to write record")
+        self.node.poke(tid)
 
     def delete(self, tid, key):
         logger.info('Got a DELETE: tid = %s, key = %s', tid.encode('hex'), key)
         self.put(tid, key, 'tombstone', 'tombstone')
+        self.node.poke(tid)
 
     def __optional(self, obj, field, default):
         _ = self
@@ -115,19 +117,20 @@ class Api(object):
 
     def tact_add_record(self, tid, obj):
         logger.info('Got a add_record: tid = %s, val= %s', tid.encode('hex'), obj)
-        if tid not in self.node.stores:
+        the_store = self.node.get_store(tid)
+        if the_store is None:
             raise HttpException(404, "Not Found")
-        the_store = self.node.stores[tid]
         (hid, _, body) = record.make_worktoken_record('application/json', json.dumps(obj))
         (_, summary) = record.mine_worktoken(hid, 1000)
         the_store.on_record(record.RT_WORKTOKEN, hid, summary, body)
+        self.node.poke(tid)
         return {'success' : True, 'id' : hid.encode('base64')[:-1]}
 
     def tact_query(self, tid, obj):
         logger.info('Got a query: tid = %s, val= %s', tid.encode('hex'), obj)
-        if tid not in self.node.stores:
+        the_store = self.node.get_store(tid)
+        if the_store is None:
             raise HttpException(404, "Not Found")
-        the_store = self.node.stores[tid]
         query = self.__require_str(obj, 'query')
         params = []
         if 'params' in obj:

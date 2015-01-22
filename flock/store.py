@@ -36,26 +36,11 @@ class SyncStore(object):
         data    BLOB,
         score   REAL
     );
-    CREATE TABLE IF NOT EXISTS _ips (
-        ip     TEXT,
-        port   INTEGER,
-        atime  INTEGER,
-        ctime  INTEGER,
-        dtime  INTEGER,
-        wtime  INTEGER,
-        busy   INTEGER,
-        PRIMARY KEY (ip, port)
-    );
-    CREATE TABLE IF NOT EXISTS _peers (
-        nid    TEXT PRIMARY KEY,
-        busy   INTEGER,
-        seq    INTEGER
-    );
     CREATE UNIQUE INDEX IF NOT EXISTS _records_hid ON _records (rtype, hid);
     CREATE INDEX IF NOT EXISTS _records_score ON _records (score);
     '''
 
-    def __init__(self, tid, db, max_size):
+    def __init__(self, tid, db, max_size = DEFAULT_APP_SIZE):
         self.tid = tid
         self.db = db
         self.max_size = max_size
@@ -74,9 +59,6 @@ class SyncStore(object):
         if row is not None:
             priv_key = RSA.importKey(row[0], 'DER')
             self.signer = PKCS1_PSS.new(priv_key)
-        self.db.execute("UPDATE _ips SET busy = 0")
-        self.db.execute("UPDATE _peers SET busy = 0")
-        self.connections = 0
         self.schema = None
         (ctype, sjson) = self.get_data(record.RT_SIGNED, SCHEMA_HID)
         if ctype == 'application/json':
@@ -104,79 +86,6 @@ class SyncStore(object):
             (buffer(priv_key.exportKey('PEM')),))
         (hid, summary, body) = record.make_pubkey_record(pub_key)
         self.on_record(record.RT_PUBKEY, hid, summary, body)
-
-    def on_add_peer(self, addr):
-        self.db.execute(
-            "INSERT OR IGNORE INTO _ips "
-            "(ip, port, atime, ctime, dtime, wtime, busy) "
-            "VALUES (?, ?, ?, NULL, 1, 0, 0)",
-            (addr[0], addr[1], int(time.time())))
-
-    def find_peer(self):
-        self.db.execute(
-            "DELETE FROM _ips where wtime > ?", (time.time() + 15*60,))
-        self.db.execute(
-            "SELECT ip, port, dtime FROM _ips " +
-            "WHERE busy = 0 AND wtime < ? ORDER BY " +
-            "IFNULL(ctime, 0) DESC, atime DESC LIMIT 1",
-            (time.time(),))
-        row = self.db.fetchone()
-        if row == None:
-            logger.debug("Finding peers, no result")
-            return None
-        (ipaddr, port, dtime) = row
-        logger.debug("Finding _peers: r = %s, dtime = %s", (ipaddr, port), dtime)
-        dtime *= 2
-        self.db.execute("UPDATE _ips SET busy = 1, dtime = ? WHERE ip = ? AND port = ?",
-            (dtime, ipaddr, port))
-        self.connections += 1
-        logger.debug("Adding find peer, Connections = %d", self.connections)
-        return (ipaddr, port)
-
-    def on_connect(self, addr, nid, outbound):
-        logger.debug("on_connect, addr = %s, nid = %s", addr, nid.encode('hex'))
-        self.db.execute("SELECT busy, seq from _peers WHERE nid = ?", (buffer(nid),))
-        row = self.db.fetchone()
-        if row is not None and row[0] == 1:
-            # Busy case, simply return failue
-            return None
-        seq = 0
-        if row is None:
-            self.db.execute("INSERT INTO _peers (nid, busy, seq) VALUES (?, ?, ?)",
-                (buffer(nid), 1, seq))
-        else:
-            self.db.execute("UPDATE _peers SET busy = 1 WHERE nid = ?", (buffer(nid),))
-            seq = row[0]
-        
-        logger.info("Add connection: remote = %s, outbound = %s, tid = %s, nid = %s",
-            addr, outbound, self.tid.encode('hex'), nid.encode('hex'))
-
-        if outbound:
-            self.db.execute(
-                "UPDATE _ips SET ctime = ?, dtime = 1, wtime = 0 " +
-                "WHERE ip = ? AND port = ?",
-                (int(time.time()), addr[0], addr[1]))
-
-        return seq
-
-    def on_disconnect(self, addr, nid):
-        self.connections -= 1
-        nstr = None
-        if nid is not None:
-            nstr = nid.encode('hex')
-        logger.debug("on_disconnect, addr = %s, nid = %s", addr, nstr)
-        logger.debug("Connections = %d", self.connections)
-        if nid is not None:
-            self.db.execute("UPDATE _peers SET busy = 0 WHERE nid = ?", (buffer(nid),))
-            logger.info("Drop connection: tid = %s, nid = %s",
-                self.tid.encode('hex'), nid.encode('hex'))
-        if addr is not None:
-            self.db.execute(
-                "UPDATE _ips SET busy = 0, wtime = dtime + ? WHERE ip = ? AND port = ?",
-                (time.time(), addr[0], addr[1]))
-
-    def on_seq_update(self, nid, seq):
-        self.db.execute("UPDATE _peers SET seq = ? WHERE nid = ?", (buffer(nid), seq))
 
     def on_summary(self, rtype, hid, summary):
         # Check for existing records
