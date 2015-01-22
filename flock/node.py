@@ -126,7 +126,12 @@ class Node(asyncore.dispatcher):
             return
         (sock, addr) = pair # pylint: disable=unpacking-non-sequence
         logger.debug("Incoming node connection, addr = %s", addr)
-        syncgroup.IncomingSync(self.asm, sock, lambda tid: self.syncgroups[tid])
+        syncgroup.IncomingSync(self.asm, sock, self.tid_to_group)
+    
+    def tid_to_group(self, tid):
+        if tid not in self.syncgroups:
+            raise ValueError("Incoming conneciton, unknown sync group")
+        return self.syncgroups[tid]
 
     def on_peer(self, tid, addr):
         if addr[0] == self.net_conn.ext_ip and addr[1] == self.net_conn.ext_port:
