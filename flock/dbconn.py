@@ -5,10 +5,12 @@
 import sqlite3
 
 class DbConn(object):
-    def __init__(self, dbfile):
+    def __init__(self, dbfile, allow_safe = False):
         self.con = sqlite3.connect(dbfile)
-        self.con.set_authorizer(self.__authorize)
-        self.be_safe = False
+        self.allow_safe = allow_safe
+        if allow_safe:
+            self.con.set_authorizer(self.__authorize)
+            self.be_safe = False
         self.cur = self.con.cursor()
 
     def execute(self, query, params=()):
@@ -16,6 +18,7 @@ class DbConn(object):
         return self.cur
 
     def execute_safe(self, query, params=()):
+        assert self.allow_safe
         self.be_safe = True
         try:
             self.cur.execute(query, params)

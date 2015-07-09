@@ -20,14 +20,14 @@ logger = logging.getLogger('syncgroup') # pylint: disable=invalid-name
 NEG_TIMEOUT = 1.5
 CONN_TIMEOUT = 3.0
 NEG_HEADER_FMT = '!4s20s' # Magic number, remote NID
-SEQ_HEADER_FMT = '!Q' # Magic number, remote NID
+SEQ_HEADER_FMT = '!Q' # Remote seq #
 
 GOAL_CONNECTIONS = 5
 MAX_CONNECTIONS = 10
 
-class SyncSetup(sync.SyncConnection):
+class SyncSetup(async.Connection):
     def __init__(self, asm, sock, group, addr, timeout): # pylint: disable=too-many-arguments
-        sync.SyncConnection.__init__(self, asm, sock)
+        async.Connection.__init__(self, asm, sock)
         self.group = group
         self.addr = addr
         self.local_nid = None
@@ -50,11 +50,11 @@ class SyncSetup(sync.SyncConnection):
 
     def handle_error(self):
         self.handle_done()
-        sync.SyncConnection.handle_error(self)
+        async.Connection.handle_error(self)
 
     def handle_close(self):
         self.handle_done()
-        sync.SyncConnection.handle_close(self)
+        async.Connection.handle_close(self)
 
     def on_neg_header(self, magic, remote):
         logger.debug("%d: Got neg header", id(self))
@@ -74,9 +74,7 @@ class SyncSetup(sync.SyncConnection):
             self.timer = None
         logger.info("%d: Sync established, Group: %s, remote: %s, nid: %s", id(self),
             self.group.tid.encode('hex'), self.getpeername(), self.remote_nid.encode('hex'))
-        self.group.active[self.remote_nid] = self
-        self.start_sync(self.group.store, remote_seq,
-            lambda seq: self.group.update_seq(self.remote_nid, seq))
+        self.group.on_connect(self.remote_nid, remote_seq, self)
 
     def on_timeout(self):
         self.timer = None
@@ -113,6 +111,18 @@ class IncomingSync(SyncSetup):
         self.complain = True
         self.start_negotiate()
 
+class OldSyncGroup(object):
+    def __init__(self, tid, nid, dbc):
+        self.tid = tid
+        self.nid = nid
+        self.dbc = dbc
+        self.store = store.SyncStore(tid, dbc)
+
+    def make_sconn(self, conn, send_seq, on_seq_update):
+        sconn = sync.SyncConnection(conn)
+        sconn.start_sync(self.store, send_seq, on_seq_update)
+        return sconn
+
 class SyncGroup(object):
     internal_sql = '''
     CREATE TABLE IF NOT EXISTS _ips (
@@ -132,13 +142,13 @@ class SyncGroup(object):
     UPDATE _ips SET busy = 0;
     UPDATE _peers SET busy = 0;
     '''
-    def __init__(self, asm, tid, nid, dbc):
+    def __init__(self, asm, handler):
         self.asm = asm
-        self.tid = tid
-        self.nid = nid
-        self.dbc = dbc
+        self.handler = handler
+        self.tid = handler.tid
+        self.nid = handler.nid
+        self.dbc = handler.dbc
         self.dbc.executescript(SyncGroup.internal_sql)
-        self.store = store.SyncStore(tid, dbc)
         self.connections = 0
         self.active = {}
 
@@ -181,6 +191,11 @@ class SyncGroup(object):
         addr = (row[0], row[1])
         self.dbc.execute("UPDATE _ips SET busy = 1 WHERE ip = ? AND port = ?", (addr[0], addr[1]))
         OutgoingSync(self.asm, self, addr)
+
+    def on_connect(self, remote_nid, remote_seq, conn):
+        on_seq_update = lambda seq: self.update_seq(remote_nid, seq)
+        sconn = self.handler.make_sconn(conn, remote_seq, on_seq_update)
+        self.active[remote_nid] = sconn 
 
     def on_disconnect(self, nid, addr):
         self.connections -= 1
@@ -232,7 +247,8 @@ class TestNode(asyncore.dispatcher):
         self.nid = ''.join(chr(random.randint(0, 255)) for _ in range(20))
         self.tid = tid
         self.dbc = dbconn.DbConn(":memory:")
-        self.group = SyncGroup(asm, self.tid, self.nid, self.dbc)
+        oldsync = OldSyncGroup(self.tid, self.nid, self.dbc)
+        self.group = SyncGroup(asm, oldsync)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         local = ('', port)

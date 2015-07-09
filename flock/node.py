@@ -51,8 +51,9 @@ class Node(asyncore.dispatcher):
                 tid = bname.decode('hex')
             except Exception: # pylint: disable=broad-except
                 continue
-            dbc = dbconn.DbConn(os.path.join(self.store_dir, bname))
-            self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, tid, self.nid, dbc)
+            dbc = dbconn.DbConn(os.path.join(self.store_dir, bname), allow_safe=True)
+            osg = syncgroup.OldSyncGroup(tid, self.nid, dbc)
+            self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, osg)
 
     def __setup_dht(self):
         # Create DHT object
@@ -145,7 +146,7 @@ class Node(asyncore.dispatcher):
     def get_store(self, tid):
         if tid not in self.syncgroups:
             return None
-        return self.syncgroups[tid].store
+        return self.syncgroups[tid].handler.store
 
     def create_app(self):
         priv_key = RSA.generate(2048)
@@ -154,9 +155,10 @@ class Node(asyncore.dispatcher):
         hid = hashlib.sha256(encoded).digest()
         tid = hid[0:20]
         store_path = os.path.join(self.store_dir, tid.encode('hex'))
-        dbc = dbconn.DbConn(store_path)
-        self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, tid, self.nid, dbc)
-        self.syncgroups[tid].store.set_priv_key(priv_key)
+        dbc = dbconn.DbConn(store_path, allow_safe=True)
+        osg = syncgroup.OldSyncGroup(tid, self.nid, dbc)
+        self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, osg)
+        self.get_store(tid).set_priv_key(priv_key)
         if self.dht is not None:
             self.dht.add_location(tid, self.net_conn.ext_port,
                 lambda addr: self.on_peer(tid, addr))
@@ -164,8 +166,9 @@ class Node(asyncore.dispatcher):
 
     def join_app(self, tid):
         store_path = os.path.join(self.store_dir, tid.encode('hex'))
-        dbc = dbconn.DbConn(store_path)
-        self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, tid, self.nid, dbc)
+        dbc = dbconn.DbConn(store_path, allow_safe=True)
+        osg = syncgroup.OldSyncGroup(tid, self.nid, dbc)
+        self.syncgroups[tid] = syncgroup.SyncGroup(self.asm, osg)
         if self.dht is not None:
             self.dht.add_location(tid, self.net_conn.ext_port,
                 lambda addr: self.on_peer(tid, addr))

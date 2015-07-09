@@ -20,12 +20,12 @@ SUMMARY_HDR_FMT = '!QB32sB' # Seq No, RType, Hash, Summary Size
 DATA_HDR_FMT = '!L' # Data size
 ADVANCE_FMT = '!?'
 
-class SyncConnection(async.Connection):
-    def __init__(self, asm, sock):
-        async.Connection.__init__(self, asm, sock)
+class SyncConnection(object):
+    def __init__(self, conn):
         self.await_advance = collections.deque()
         self.await_data = collections.deque()
         self.max_outstanding = OUTSTANDING
+        self.conn = conn
         self.store = None
         self.send_seq = None
         self.recv_seq = None
@@ -36,17 +36,17 @@ class SyncConnection(async.Connection):
         self.send_seq = send_seq
         self.on_seq_update = on_seq_update
         self.fill_queue()
-        self.recv_buffer(1, self.on_type)
+        self.conn.recv_buffer(1, self.on_type)
 
     def on_type(self, buf):
         logger.debug("Got type %s", buf)
         if buf[0] == 'S':
-            self.recv_struct(SUMMARY_HDR_FMT, self.on_summary_header)
+            self.conn.recv_struct(SUMMARY_HDR_FMT, self.on_summary_header)
         elif buf[0] == 'D':
-            self.recv_struct(DATA_HDR_FMT, self.on_data_header)
+            self.conn.recv_struct(DATA_HDR_FMT, self.on_data_header)
         elif buf[0] == 'R':
             _ = self.outstanding.popleft()
-            self.recv_buffer(1, self.on_type)
+            self.conn.recv_buffer(1, self.on_type)
         elif buf[0] == 'N':
             self.on_advance(True)
         elif buf[0] == 'O':
@@ -56,31 +56,31 @@ class SyncConnection(async.Connection):
 
     def on_summary_header(self, seq, rtype, hid, slen):
         callback = lambda summary: self.on_summary(seq, rtype, hid, summary)
-        self.recv_buffer(slen, callback)
+        self.conn.recv_buffer(slen, callback)
 
     def on_summary(self, seq, rtype, hid, summary):
         need_data = self.store.on_summary(rtype, hid, summary)
         if need_data:
             logger.debug("requesting data")
             self.await_data.append((seq, rtype, hid, summary))
-            self.send_buffer('N')
+            self.conn.send_buffer('N')
         else:
-            self.send_buffer('O')
+            self.conn.send_buffer('O')
         self.recv_seq = seq
         self.update_seq()
-        self.recv_buffer(1, self.on_type)
+        self.conn.recv_buffer(1, self.on_type)
 
     def on_data_header(self, dsize):
         (_, rtype, hid, summary) = self.await_data.popleft()
         callback = lambda data: self.on_data(rtype, hid, summary, data)
-        self.recv_buffer(dsize, callback)
+        self.conn.recv_buffer(dsize, callback)
 
     def on_data(self, rtype, hid, summary, data):
         logger.debug("adding data")
         if not self.store.on_record(rtype, hid, summary, data):
             raise ValueError("Validation failure, erroring connection")
         self.update_seq()
-        self.recv_buffer(1, self.on_type)
+        self.conn.recv_buffer(1, self.on_type)
 
     def update_seq(self):
         if len(self.await_data) == 0:
@@ -97,14 +97,14 @@ class SyncConnection(async.Connection):
             data = self.store.get_raw_data(rtype, hid)
             if data == None:
                 logger.debug("sending R")
-                self.send_buffer('R')
+                self.conn.send_buffer('R')
             else:
                 logger.debug("sending D")
-                self.send_buffer('D')
-                self.send_struct(DATA_HDR_FMT, len(data))
-                self.send_buffer(data)
+                self.conn.send_buffer('D')
+                self.conn.send_struct(DATA_HDR_FMT, len(data))
+                self.conn.send_buffer(data)
         self.fill_queue()
-        self.recv_buffer(1, self.on_type)
+        self.conn.recv_buffer(1, self.on_type)
 
     def fill_queue(self):
         while len(self.await_advance) < self.max_outstanding:
@@ -115,9 +115,9 @@ class SyncConnection(async.Connection):
             self.send_seq = seq
             logger.debug("sending seq %s", seq)
             self.await_advance.append((rtype, hid))
-            self.send_buffer("S")
-            self.send_struct(SUMMARY_HDR_FMT, seq, rtype, hid, len(summary))
-            self.send_buffer(summary)
+            self.conn.send_buffer("S")
+            self.conn.send_struct(SUMMARY_HDR_FMT, seq, rtype, hid, len(summary))
+            self.conn.send_buffer(summary)
 
 class TestSync(unittest.TestCase):
     @staticmethod
@@ -145,8 +145,8 @@ class TestSync(unittest.TestCase):
             TestSync.add_data(all_data, ss2, i)
         # Make the connections
         (sock1, sock2) = socket.socketpair()
-        node1 = SyncConnection(asm, sock1)
-        node2 = SyncConnection(asm, sock2)
+        node1 = SyncConnection(async.Connection(asm, sock1))
+        node2 = SyncConnection(async.Connection(asm, sock2))
         node1.start_sync(ss1, 0, lambda seq: None)
         node2.start_sync(ss2, 0, lambda seq: None)
         # Kick off some async action
